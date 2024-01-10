@@ -1,0 +1,8 @@
+# Output
+/Bin/
+/Bin-Int/
+
+# Visual Studio Code
+/.vscode/
+/.cache/
+compile_commands.json
