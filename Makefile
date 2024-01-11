@@ -49,8 +49,12 @@ Bin/$(CONFIG)/Boot/Drive.img: Kernel ImgGen $(BOOT_FILES)
 
 Drive.img: Bin/$(CONFIG)/Boot/Drive.img
 
-
 QEMU_ARGS += -drive format=raw,file=Bin/$(CONFIG)/Boot/Drive.img
 QEMU_ARGS += -vga vmware -debugcon stdio
+ifeq ($(CONFIG), debug)
+QEMU_ARGS += -s -S
+else ifeq ($(CONFIG), release)
+QEMU_ARGS += -s -S
+endif
 run: Drive.img
 	$(QEMU) $(QEMU_ARGS)

@@ -18,8 +18,6 @@ static void VisitUltraFramebufferAttribute(struct ultra_framebuffer_attribute* a
 static void VisitUltraAttribute(struct ultra_attribute_header* attribute, void* userdata);
 
 #if BUILD_IS_ARCH_X86_64
-extern uint64_t g_x86_64GDT[512];
-
 __attribute__((interrupt)) static void TestInterruptHandler(struct x86_64InterruptState* state);
 #endif
 
