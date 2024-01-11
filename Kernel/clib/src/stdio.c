@@ -811,18 +811,18 @@ size_t vfprintf(FILE* restrict stream, const char* restrict fmt, va_list vlist)
 		case 'g':
 		case 'G':
 		{
-			long double v = 0;
+			double v = 0;
 			switch (options.lengthMode)
 			{
 			case 0:
 			case 1:
 			case 2:
-			case 3: v = (long double) va_arg(vlist, double); break;
+			case 3: v = va_arg(vlist, double); break;
 			case 4:
 			case 5:
 			case 6:
 			case 7: break;
-			case 8: v = va_arg(vlist, long double); break;
+			case 8: v = va_arg(vlist, double); break;
 			}
 			break;
 		}
