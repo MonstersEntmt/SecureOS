@@ -36,7 +36,7 @@ endif
 
 $(KERNEL_LIBC_C_OBJS): Bin-Int/%.o: %
 	mkdir -p $(dir $@)
-	$(CC) $(KERNEL_LIBC_CFLAGS) -o $@ $<
+	$(CC) $(KERNEL_LIBC_CFLAGS) -c -o $@ $<
 	echo Compiled $<
 
 $(KERNEL_LIBC_ASM_OBJS): Bin-Int/%.o: %
@@ -46,7 +46,7 @@ $(KERNEL_LIBC_ASM_OBJS): Bin-Int/%.o: %
 
 $(KERNEL_C_OBJS): Bin-Int/%.o: %
 	mkdir -p $(dir $@)
-	$(CC) $(KERNEL_CFLAGS) -o $@ $<
+	$(CC) $(KERNEL_CFLAGS) -c -o $@ $<
 	echo Compiled $<
 
 $(KERNEL_ASM_OBJS): Bin-Int/%.o: %

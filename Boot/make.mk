@@ -1,6 +1,8 @@
 IMGGEN_CPP_SRCS := $(shell find Boot/ImgGen/ -name '*.cpp')
 IMGGEN_CPP_OBJS := $(IMGGEN_CPP_SRCS:%=Bin-Int/%.o)
 
+IMGGEN_OBJS := $(IMGGEN_CPP_OBJS)
+
 IMGGEN_CXXFLAGS := -std=c++23 -O3
 IMGGEN_LDCXXFLAGS := -fuse-ld=lld
 
