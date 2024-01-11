@@ -7,9 +7,13 @@
 
 #include <algorithm>
 #include <iostream>
+#include <string_view>
 
 namespace FAT32
 {
+	static bool FillShortname(std::u16string_view filename, char (&shortName)[11], bool& lowercaseName, bool& lowercaseExt);
+	static void GenShortnameTail(char (&shortName)[11], const std::vector<FAT32DirectoryEntry>& dirEntries);
+	static void AppendLongFilanameEntries(std::vector<FAT32DirectoryEntry>& dirEntries, std::u16string_view filename, uint8_t checksum);
 	static void WriteBPB(FSState& state, std::fstream& imageStream, uint32_t sector);
 	static void WriteFSInfo(FSState& state, std::fstream& imageStream, uint32_t sector);
 	static void WriteFAT(FSState& state, std::fstream& imageStream, uint32_t sector, const uint32_t* fat, size_t count);
@@ -247,114 +251,16 @@ namespace FAT32
 
 		auto nameutf16 = UTF8ToUTF16(name);
 		char shortName[11];
-		memset(shortName, ' ', 11);
-		if (!state.NoShortName && nameutf16.size() <= 8)
+		bool lowercaseName = false, lowercaseExt = false;
+		bool isShortName = FillShortname(nameutf16, shortName, lowercaseName, lowercaseExt);
+		if (!isShortName)
 		{
-			for (size_t i = 0; i < nameutf16.size(); ++i)
-			{
-				char16_t c = (char16_t) std::towupper(nameutf16[i]);
-				if (c >= 0xFF || c < 0x20)
-					c = u'_';
-				shortName[i] = (char) c;
-			}
-		}
-		else
-		{
-			for (size_t i = 0; i < std::min<size_t>(6, nameutf16.size()); ++i)
-			{
-				char16_t c = (char16_t) std::towupper(nameutf16[i]);
-				if (c >= 0xFF || c < 0x20)
-					c = u'_';
-				shortName[i] = (char) c;
-			}
-			shortName[6] = '~';
-			shortName[7] = '1';
-			{
-				static constexpr const char c_HexDigits[] = "0123456789ABCDEF";
-
-				uint16_t num = 1;
-				while (true)
-				{
-					for (auto& entry : itr->Entries)
-					{
-						if ((entry.Attributes & 0xF) == 0xF)
-							continue;
-
-						if (memcmp(entry.Name, shortName, 11) == 0)
-						{
-							++num;
-							if (num < 0x10)
-							{
-								shortName[6] = '~';
-								shortName[7] = c_HexDigits[num & 0xF];
-							}
-							else if (num < 0x100)
-							{
-								shortName[5] = '~';
-								shortName[6] = c_HexDigits[(num >> 4) & 0xF];
-								shortName[7] = c_HexDigits[num & 0xF];
-							}
-							else if (num < 0x1000)
-							{
-								shortName[4] = '~';
-								shortName[5] = c_HexDigits[(num >> 8) & 0xF];
-								shortName[6] = c_HexDigits[(num >> 4) & 0xF];
-								shortName[7] = c_HexDigits[num & 0xF];
-							}
-							else
-							{
-								shortName[3] = '~';
-								shortName[4] = c_HexDigits[(num >> 12) & 0xF];
-								shortName[5] = c_HexDigits[(num >> 8) & 0xF];
-								shortName[6] = c_HexDigits[(num >> 4) & 0xF];
-								shortName[7] = c_HexDigits[num & 0xF];
-							}
-							goto CONTINUE;
-						}
-					}
-					break;
-				CONTINUE:
-					continue;
-				}
-			}
+			GenShortnameTail(shortName, itr->Entries);
 
 			uint8_t checksum = 0;
 			for (size_t i = 0; i < 11; ++i)
 				checksum = (checksum & 1 ? 0x80 : 0) + (checksum >> 1) + shortName[i];
-			for (size_t i = (nameutf16.size() + 12) / 13, j = 0; i-- > 0; ++j)
-			{
-				FAT32LongFilenameDirectoryEntry* entry = (FAT32LongFilenameDirectoryEntry*) &itr->Entries.emplace_back();
-				entry->Ordinal                         = (uint8_t) (i + 1);
-				if (j == 0)
-					entry->Ordinal |= 0x40;
-				entry->Attributes      = 0x0F;
-				entry->Type            = 0;
-				entry->Checksum        = checksum;
-				entry->FirstClusterLow = 0;
-
-				memset(entry->Name1, 0xFF, 10);
-				memset(entry->Name2, 0xFF, 12);
-				memset(entry->Name3, 0xFF, 4);
-				size_t charsLeft = std::min<size_t>(13, nameutf16.size() - i * 13);
-				for (size_t k = 0; k < charsLeft; ++k)
-				{
-					if (k < 5)
-						entry->Name1[k] = nameutf16[i * 13 + k];
-					else if (k < 11)
-						entry->Name2[k - 5] = nameutf16[i * 13 + k];
-					else
-						entry->Name3[k - 11] = nameutf16[i * 13 + k];
-				}
-				if (charsLeft < 13)
-				{
-					if (charsLeft < 5)
-						entry->Name1[charsLeft] = u'\0';
-					else if (charsLeft < 11)
-						entry->Name2[charsLeft - 5] = u'\0';
-					else
-						entry->Name3[charsLeft - 11] = u'\0';
-				}
-			}
+			AppendLongFilanameEntries(itr->Entries, nameutf16, checksum);
 		}
 
 		uint32_t firstCluster = AllocCluster(state);
@@ -362,7 +268,7 @@ namespace FAT32
 		auto& dirEntry = itr->Entries.emplace_back();
 		memcpy(dirEntry.Name, shortName, 11);
 		dirEntry.Attributes        = 0x10;
-		dirEntry.NTRes             = 0;
+		dirEntry.NTRes             = lowercaseName << 3 | lowercaseExt << 4;
 		dirEntry.CreationTimeTenth = 0;
 		dirEntry.CreationTime      = 0;
 		dirEntry.CreationDate      = 0;
@@ -500,130 +406,16 @@ namespace FAT32
 
 		auto nameutf16 = UTF8ToUTF16(name);
 		char shortName[11];
-		memset(shortName, ' ', 11);
-		size_t extBegin = std::min<size_t>(nameutf16.size(), nameutf16.find_last_of(u'.'));
-		if (!state.NoShortName && extBegin < 8 && (nameutf16.size() - extBegin - 1) <= 3)
+		bool lowercaseName = false, lowercaseExt = false;
+		bool isShortName = FillShortname(nameutf16, shortName, lowercaseName, lowercaseExt);
+		if (!isShortName)
 		{
-			for (size_t i = 0; i < extBegin; ++i)
-			{
-				char16_t c = (char16_t) std::towupper(nameutf16[i]);
-				if (c >= 0xFF || c < 0x20)
-					c = u'_';
-				shortName[i] = (char) c;
-			}
-			++extBegin;
-			for (size_t i = 0; i < std::min<size_t>(3, nameutf16.size() - extBegin); ++i)
-			{
-				char16_t c = (char16_t) std::towupper(nameutf16[extBegin + i]);
-				if (c >= 0xFF || c < 0x20)
-					c = u'_';
-				shortName[8 + i] = (char) c;
-			}
-		}
-		else
-		{
-			for (size_t i = 0; i < std::min<size_t>(6, extBegin); ++i)
-			{
-				char16_t c = (char16_t) std::towupper(nameutf16[i]);
-				if (c >= 0xFF || c < 0x20)
-					c = u'_';
-				shortName[i] = (char) c;
-			}
-			++extBegin;
-			for (size_t i = 0; i < std::min<size_t>(3, nameutf16.size() - extBegin); ++i)
-			{
-				char16_t c = (char16_t) std::towupper(nameutf16[extBegin + i]);
-				if (c >= 0xFF || c < 0x20)
-					c = u'_';
-				shortName[8 + i] = (char) c;
-			}
-			shortName[6] = '~';
-			shortName[7] = '1';
-			{
-				static constexpr const char c_HexDigits[] = "0123456789ABCDEF";
+			GenShortnameTail(shortName, itr->Entries);
 
-				uint16_t num = 1;
-				while (true)
-				{
-					for (auto& entry : itr->Entries)
-					{
-						if ((entry.Attributes & 0xF) == 0xF)
-							continue;
-
-						if (memcmp(entry.Name, shortName, 11) == 0)
-						{
-							++num;
-							if (num < 0x10)
-							{
-								shortName[6] = '~';
-								shortName[7] = c_HexDigits[num & 0xF];
-							}
-							else if (num < 0x100)
-							{
-								shortName[5] = '~';
-								shortName[6] = c_HexDigits[(num >> 4) & 0xF];
-								shortName[7] = c_HexDigits[num & 0xF];
-							}
-							else if (num < 0x1000)
-							{
-								shortName[4] = '~';
-								shortName[5] = c_HexDigits[(num >> 8) & 0xF];
-								shortName[6] = c_HexDigits[(num >> 4) & 0xF];
-								shortName[7] = c_HexDigits[num & 0xF];
-							}
-							else
-							{
-								shortName[3] = '~';
-								shortName[4] = c_HexDigits[(num >> 12) & 0xF];
-								shortName[5] = c_HexDigits[(num >> 8) & 0xF];
-								shortName[6] = c_HexDigits[(num >> 4) & 0xF];
-								shortName[7] = c_HexDigits[num & 0xF];
-							}
-							goto CONTINUE;
-						}
-					}
-					break;
-				CONTINUE:
-					continue;
-				}
-			}
 			uint8_t checksum = 0;
 			for (size_t i = 0; i < 11; ++i)
 				checksum = (checksum & 1 ? 0x80 : 0) + (checksum >> 1) + shortName[i];
-			for (size_t i = (nameutf16.size() + 12) / 13, j = 0; i-- > 0; ++j)
-			{
-				FAT32LongFilenameDirectoryEntry* entry = (FAT32LongFilenameDirectoryEntry*) &itr->Entries.emplace_back();
-				entry->Ordinal                         = (uint8_t) (i + 1);
-				if (j == 0)
-					entry->Ordinal |= 0x40;
-				entry->Attributes      = 0x0F;
-				entry->Type            = 0;
-				entry->Checksum        = checksum;
-				entry->FirstClusterLow = 0;
-
-				memset(entry->Name1, 0xFF, 10);
-				memset(entry->Name2, 0xFF, 12);
-				memset(entry->Name3, 0xFF, 4);
-				size_t charsLeft = std::min<size_t>(13, nameutf16.size() - i * 13);
-				for (size_t k = 0; k < charsLeft; ++k)
-				{
-					if (k < 5)
-						entry->Name1[k] = nameutf16[i * 13 + k];
-					else if (k < 11)
-						entry->Name2[k - 5] = nameutf16[i * 13 + k];
-					else
-						entry->Name3[k - 11] = nameutf16[i * 13 + k];
-				}
-				if (charsLeft < 13)
-				{
-					if (charsLeft < 5)
-						entry->Name1[charsLeft] = u'\0';
-					else if (charsLeft < 11)
-						entry->Name2[charsLeft - 5] = u'\0';
-					else
-						entry->Name3[charsLeft - 11] = u'\0';
-				}
-			}
+			AppendLongFilanameEntries(itr->Entries, nameutf16, checksum);
 		}
 
 		uint32_t firstCluster = AllocCluster(state);
@@ -631,7 +423,7 @@ namespace FAT32
 		auto& dirEntry = itr->Entries.emplace_back();
 		memcpy(dirEntry.Name, shortName, 11);
 		dirEntry.Attributes        = 0x00;
-		dirEntry.NTRes             = 0;
+		dirEntry.NTRes             = lowercaseName << 3 | lowercaseExt << 4;
 		dirEntry.CreationTimeTenth = 0;
 		dirEntry.CreationTime      = 0;
 		dirEntry.CreationDate      = 0;
@@ -726,6 +518,191 @@ namespace FAT32
 		if (itr == state.Directories.end())
 			return;
 		itr->Entries[filestate.Direntry].FileSize = dataLength;
+	}
+
+	bool FillShortname(std::u16string_view filename, char (&shortName)[11], bool& lowercaseName, bool& lowercaseExt)
+	{
+		bool   needsLongName      = false;
+		size_t lowercaseNameCount = 0;
+		size_t lowercaseExtCount  = 0;
+
+		size_t extBegin = std::min<size_t>(filename.size(), filename.find_last_of(u'.'));
+		if (extBegin > 8 || (filename.size() - extBegin) > 4)
+			needsLongName = true;
+
+		memset(shortName, ' ', 11);
+		for (size_t i = 0; i < std::min<size_t>(8, extBegin); ++i)
+		{
+			char16_t c = filename[i];
+			if (c >= 0x80)
+			{
+				needsLongName = true;
+				shortName[i]  = '_';
+			}
+			else
+			{
+				shortName[i] = (char) std::towupper(c);
+			}
+			if (c >= 'a' && c <= 'z')
+				++lowercaseNameCount;
+		}
+		for (size_t i = extBegin + 1, j = 8; i < filename.size(); ++i, ++j)
+		{
+			char16_t c = filename[i];
+			if (c >= 0x80)
+			{
+				needsLongName = true;
+				shortName[j]  = '_';
+			}
+			else
+			{
+				shortName[j] = (char) std::towupper(c);
+			}
+			if (c >= 'a' && c <= 'z')
+				++lowercaseExtCount;
+		}
+
+		if (lowercaseNameCount == 0)
+			lowercaseName = false;
+		else if (lowercaseNameCount == extBegin)
+			lowercaseName = true;
+		else
+			needsLongName = true;
+		if (lowercaseExtCount == 0)
+			lowercaseExt = false;
+		else if (lowercaseExtCount == filename.size() - extBegin - 1)
+			lowercaseExt = true;
+		else
+			needsLongName = true;
+		return !needsLongName;
+	}
+
+	void GenShortnameTail(char (&shortName)[11], const std::vector<FAT32DirectoryEntry>& dirEntries)
+	{
+		uint32_t nextN = 1;
+		for (auto& entry : dirEntries)
+		{
+			if ((entry.Attributes & 0xF) == 0xF)
+				continue;
+
+			if (memcmp(entry.Name + 8, shortName + 8, 3) != 0) // Different extensions
+				continue;
+
+			bool   foundMatch = true;
+			size_t i          = 0;
+			for (; i < 8; ++i)
+			{
+				char c = entry.Name[i];
+				if (c == '~')
+					break;
+				if (shortName[i] != c)
+				{
+					foundMatch = false;
+					break;
+				}
+			}
+			if (!foundMatch || i == 8)
+				continue;
+
+			uint64_t v = std::strtoull((const char*) entry.Name + i, nullptr, 10);
+			if (v > nextN)
+				nextN = (uint32_t) std::max<uint64_t>(v, 0xFFFF'FFFE) + 1;
+		}
+
+		if (nextN < 10)
+		{
+			shortName[6] = '~';
+			shortName[7] = '0' + nextN;
+		}
+		else if (nextN < 100)
+		{
+			shortName[5] = '~';
+			shortName[7] = '0' + nextN % 10;
+			shortName[6] = '0' + nextN / 10;
+		}
+		else if (nextN < 1'000)
+		{
+			shortName[4] = '~';
+			shortName[7] = '0' + nextN % 10;
+			nextN       /= 10;
+			shortName[6] = '0' + nextN % 10;
+			shortName[5] = '0' + nextN / 10;
+		}
+		else if (nextN < 10'000)
+		{
+			shortName[3] = '~';
+			shortName[7] = '0' + nextN % 10;
+			nextN       /= 10;
+			shortName[6] = '0' + nextN % 10;
+			nextN       /= 10;
+			shortName[5] = '0' + nextN % 10;
+			shortName[4] = '0' + nextN / 10;
+		}
+		else if (nextN < 100'000)
+		{
+			shortName[2] = '~';
+			shortName[7] = '0' + nextN % 10;
+			nextN       /= 10;
+			shortName[6] = '0' + nextN % 10;
+			nextN       /= 10;
+			shortName[5] = '0' + nextN % 10;
+			nextN       /= 10;
+			shortName[4] = '0' + nextN % 10;
+			shortName[3] = '0' + nextN / 10;
+		}
+		else if (nextN < 1'000'000)
+		{
+			shortName[1] = '~';
+			shortName[7] = '0' + nextN % 10;
+			nextN       /= 10;
+			shortName[6] = '0' + nextN % 10;
+			nextN       /= 10;
+			shortName[5] = '0' + nextN % 10;
+			nextN       /= 10;
+			shortName[4] = '0' + nextN % 10;
+			nextN       /= 10;
+			shortName[3] = '0' + nextN % 10;
+			shortName[2] = '0' + nextN / 10;
+		}
+	}
+
+	void AppendLongFilanameEntries(std::vector<FAT32DirectoryEntry>& dirEntries, std::u16string_view filename, uint8_t checksum)
+	{
+		size_t entryCount = (filename.size() + 12) / 13;
+		for (size_t i = entryCount, j = 0; i-- > 0; ++j)
+		{
+			FAT32LongFilenameDirectoryEntry* entry = (FAT32LongFilenameDirectoryEntry*) &dirEntries.emplace_back();
+			entry->Ordinal                         = (uint8_t) (i + 1);
+			if (j == 0)
+				entry->Ordinal |= 0x40;
+			entry->Attributes      = 0x0F;
+			entry->Type            = 0;
+			entry->Checksum        = checksum;
+			entry->FirstClusterLow = 0;
+
+			memset(entry->Name1, 0xFF, 10);
+			memset(entry->Name2, 0xFF, 12);
+			memset(entry->Name3, 0xFF, 4);
+			size_t charsLeft = std::min<size_t>(13, filename.size() - i * 13);
+			for (size_t k = 0; k < charsLeft; ++k)
+			{
+				if (k < 5)
+					entry->Name1[k] = filename[i * 13 + k];
+				else if (k < 11)
+					entry->Name2[k - 5] = filename[i * 13 + k];
+				else
+					entry->Name3[k - 11] = filename[i * 13 + k];
+			}
+			if (charsLeft < 13)
+			{
+				if (charsLeft < 5)
+					entry->Name1[charsLeft] = u'\0';
+				else if (charsLeft < 11)
+					entry->Name2[charsLeft - 5] = u'\0';
+				else
+					entry->Name3[charsLeft - 11] = u'\0';
+			}
+		}
 	}
 
 	void WriteBPB(FSState& state, std::fstream& imageStream, uint32_t sector)

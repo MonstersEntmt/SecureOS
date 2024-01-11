@@ -230,10 +230,9 @@ int main(int argc, char** argv)
 		case EPartitionFormat::FAT32:
 		{
 			FAT32::FSState fsState;
-			fsState.FirstLBA    = gptState.Partitions[i].FirstLBA;
-			fsState.LastLBA     = gptState.Partitions[i].LastLBA;
-			fsState.Verbose     = options.Verbose;
-			fsState.NoShortName = true;
+			fsState.FirstLBA = gptState.Partitions[i].FirstLBA;
+			fsState.LastLBA  = gptState.Partitions[i].LastLBA;
+			fsState.Verbose  = options.Verbose;
 			FAT32::InitState(fsState, partitionOption.Name);
 
 			for (auto& copy : options.FileCopies)

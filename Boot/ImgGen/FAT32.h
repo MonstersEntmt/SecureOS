@@ -100,7 +100,6 @@ namespace FAT32
 		std::vector<DirectoryState> Directories;
 
 		bool Verbose;
-		bool NoShortName;
 	};
 
 	struct FileState
