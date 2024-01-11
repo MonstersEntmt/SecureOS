@@ -8,6 +8,7 @@ struct IDTEntry
 };
 
 alignas(16) struct IDTEntry g_x86_64IDT[256];
+alignas(16) uint64_t g_x86_64IDTR[2];
 
 bool x86_64IDTClearDescriptors()
 {

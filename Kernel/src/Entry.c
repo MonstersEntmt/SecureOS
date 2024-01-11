@@ -6,6 +6,7 @@
 #if BUILD_IS_ARCH_X86_64
 	#include "x86_64/GDT.h"
 	#include "x86_64/IDT.h"
+	#include "x86_64/InterruptHandlers.h"
 #endif
 
 static void VisitUltraInvalidAttribute(void* userdata);
@@ -16,10 +17,6 @@ static void VisitUltraModuleInfoAttribute(struct ultra_module_info_attribute* at
 static void VisitUltraCommandLineAttribute(struct ultra_command_line_attribute* attribute, void* userdata);
 static void VisitUltraFramebufferAttribute(struct ultra_framebuffer_attribute* attribute, void* userdata);
 static void VisitUltraAttribute(struct ultra_attribute_header* attribute, void* userdata);
-
-#if BUILD_IS_ARCH_X86_64
-__attribute__((interrupt)) static void TestInterruptHandler(struct x86_64InterruptState* state);
-#endif
 
 void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 {
@@ -37,10 +34,11 @@ void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 	x86_64GDTSetDataDescriptor(2);
 	x86_64GDTSetCodeDescriptor(3, 3, false);
 	x86_64GDTSetDataDescriptor(4);
-	x86_64LoadGDT();
-	x86_64LoadLDT(0);
 	x86_64IDTClearDescriptors();
-	x86_64IDTSetInterruptGate(69, (uint64_t) TestInterruptHandler, 1, 0, 0);
+	x86_64IDTSetTrapGate(0x0D, (uint64_t) x86_64GPExceptionHandlerWrapper, 8, 0, 0);
+	x86_64IDTSetInterruptGate(0x40, (uint64_t) x86_64TestInterruptHandlerWrapper, 8, 0, 0);
+	x86_64LoadGDT(8, 16);
+	x86_64LoadLDT(0);
 	x86_64LoadIDT();
 	EnableInterrupts();
 #endif
@@ -55,18 +53,11 @@ void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 	}
 
 #if BUILD_IS_ARCH_X86_64
-	__asm__("int $69");
+	__asm__("int $0x40");
 #endif
 
 	CPUHalt();
 }
-
-#if BUILD_IS_ARCH_X86_64
-void TestInterruptHandler(struct x86_64InterruptState* state)
-{
-	DebugCon_WriteFormatted("Test Interrupt called with state:\n  RIP = 0x%016llX\n  RSP = 0x%016llX\n  RFLAGS = 0x%08X\n  CS = 0x%04hX\n  SS = 0x%04hX\n", state->rip, state->rsp, (uint32_t) state->rflags, state->cs, state->ss);
-}
-#endif
 
 void VisitUltraAttribute(struct ultra_attribute_header* attribute, void* userdata)
 {
