@@ -1,6 +1,7 @@
 #include "Build.h"
 #include "DebugCon.h"
 #include "Halt.h"
+#include "PMM.h"
 #include "Ultra/UltraProtocol.h"
 
 #if BUILD_IS_ARCH_X86_64
@@ -52,9 +53,17 @@ void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 		}
 	}
 
-#if BUILD_IS_ARCH_X86_64
-	__asm__("int $0x40");
-#endif
+	// PMMPrintFreeList();
+	void* singlePage = PMMAlloc();
+	// PMMPrintFreeList();
+	DebugCon_WriteFormatted("Single Page: 0x%016X\r\n", singlePage);
+	void* multiplePages = PMMAllocContiguous(16);
+	// PMMPrintFreeList();
+	DebugCon_WriteFormatted("Multiple Pages: 0x%016X\r\n", multiplePages);
+	PMMFree(singlePage);
+	// PMMPrintFreeList();
+	PMMFreeContiguous(multiplePages, 16);
+	// PMMPrintFreeList();
 
 	CPUHalt();
 }
@@ -119,6 +128,31 @@ void VisitUltraKernelInfoAttribute(struct ultra_kernel_info_attribute* attribute
 							attribute->size);
 }
 
+static bool PMMUltraMemoryMapGetter(void* userdata, size_t index, struct PMMMemoryMapEntry* entry)
+{
+	struct ultra_memory_map_attribute* attribute  = (struct ultra_memory_map_attribute*) userdata;
+	size_t                             entryCount = ULTRA_MEMORY_MAP_ENTRY_COUNT(attribute->header);
+	if (index >= entryCount)
+		return false;
+	struct ultra_memory_map_entry* mapentry = attribute->entries + index;
+	entry->Start                            = mapentry->physical_address;
+	entry->Size                             = mapentry->size;
+	switch (mapentry->type)
+	{
+	case ULTRA_MEMORY_TYPE_INVALID: entry->Type = PMMMemoryMapTypeInvalid; break;
+	case ULTRA_MEMORY_TYPE_FREE: entry->Type = PMMMemoryMapTypeFree; break;
+	case ULTRA_MEMORY_TYPE_RESERVED: entry->Type = PMMMemoryMapTypeReserved; break;
+	case ULTRA_MEMORY_TYPE_RECLAIMABLE: entry->Type = PMMMemoryMapTypeReclaimable; break;
+	case ULTRA_MEMORY_TYPE_NVS: entry->Type = PMMMemoryMapTypeNVS; break;
+	case ULTRA_MEMORY_TYPE_LOADER_RECLAIMABLE: entry->Type = PMMMemoryMapTypeLoaderReclaimable; break;
+	case ULTRA_MEMORY_TYPE_MODULE: entry->Type = PMMMemoryMapTypeModule; break;
+	case ULTRA_MEMORY_TYPE_KERNEL_STACK: entry->Type = PMMMemoryMapTypeKernel; break;
+	case ULTRA_MEMORY_TYPE_KERNEL_BINARY: entry->Type = PMMMemoryMapTypeKernel; break;
+	default: entry->Type = PMMMemoryMapTypeReserved; break;
+	}
+	return true;
+}
+
 void VisitUltraMemoryMapAttribute(struct ultra_memory_map_attribute* attribute, void* userdata)
 {
 	DebugCon_WriteString("Memory Map:\r\n");
@@ -146,6 +180,8 @@ void VisitUltraMemoryMapAttribute(struct ultra_memory_map_attribute* attribute, 
 								entry->physical_address + entry->size,
 								entry->size);
 	}
+
+	PMMInit(entryCount, PMMUltraMemoryMapGetter, attribute);
 }
 
 void VisitUltraModuleInfoAttribute(struct ultra_module_info_attribute* attribute, void* userdata)
