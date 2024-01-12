@@ -3,7 +3,6 @@
 #include <string.h>
 
 alignas(16) uint64_t g_x86_64GDT[512];
-alignas(16) uint64_t g_x86_64GDTR[2];
 
 bool x86_64GDTClearDescriptors(void)
 {

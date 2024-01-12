@@ -1,12 +1,13 @@
 %include "x86_64/Build.asminc"
 
 ExternLabel g_x86_64GDT
-ExternLabel g_x86_64GDTR
 
 GlobalLabel x86_64LoadGDT ; void x86_64LoadGDT(uint16_t initalCS, uint64_t initialDS)
-    mov word [g_x86_64GDTR], 4095
-    mov qword [g_x86_64GDTR + 2], g_x86_64GDT
-    lgdt [g_x86_64GDTR]
+    sub rsp, 10h
+    mov word [rsp], 4095
+    mov qword [rsp + 2], g_x86_64GDT
+    lgdt [rsp]
+    add rsp, 10h
     push rdi
     lea rax, [.reloadCS]
     push rax
