@@ -12,15 +12,12 @@ struct PMMFreeHeader
 
 struct PMMState
 {
-	uint64_t LastFreeAddress;
-	uint64_t LastAddress;
-	uint64_t PagesFree;
-
-	uint64_t* Bitmap;
+	struct PMMMemoryStats Stats;
 
 	size_t                    MemoryMapCount;
 	struct PMMMemoryMapEntry* MemoryMap;
 
+	uint64_t*             Bitmap;
 	struct PMMFreeHeader* Last;
 	struct PMMFreeHeader* SkipList[255];
 };
@@ -187,30 +184,40 @@ static void PMMEraseFreeRange(struct PMMFreeHeader* header)
 	header->Next = nullptr;
 }
 
-void PMMSetupMemoryMap(size_t entryCount, PMMGetMemoryMapEntryFn getter, void* userdata)
+void PMMInit(size_t entryCount, PMMGetMemoryMapEntryFn getter, void* userdata)
 {
-	uint64_t lastFreeAddress = 0;
-	uint64_t lastAddress     = 0;
+	uint64_t lastUsableAddress = 0;
+	uint64_t lastAddress       = 0;
 	for (size_t i = 0; i < entryCount; ++i)
 	{
 		struct PMMMemoryMapEntry entry;
 		if (!getter(userdata, i, &entry))
 			continue;
+
 		if (entry.Start + entry.Size > lastAddress)
 			lastAddress = entry.Start + entry.Size;
-		if (!(entry.Type & PMMMemoryMapTypeFree))
+
+		if (!(entry.Type & PMMMemoryMapTypeUsable))
 			continue;
-		if (entry.Start + entry.Size > lastFreeAddress)
-			lastFreeAddress = entry.Start + entry.Size;
+
+		if (entry.Start + entry.Size > lastUsableAddress)
+			lastUsableAddress = entry.Start + entry.Size;
 	}
 
-	size_t pmmRequiredSize = (sizeof(struct PMMState) + sizeof(struct PMMMemoryMapEntry) * entryCount + (lastFreeAddress / 32768) + 4095) & ~0xFFF; // (32768 = 4 KiB page size * 8 bits)
+	size_t pmmRequiredSize = sizeof(struct PMMState) + (lastUsableAddress / 32768); // (32768 = 4 KiB page size * 8 bits for bitmap)
+	pmmRequiredSize        = (pmmRequiredSize + 4095) & ~0xFFFUL;
 	size_t pmmAllocatedIn  = ~0UL;
 	for (size_t i = 0; i < entryCount; ++i)
 	{
 		struct PMMMemoryMapEntry entry;
 		if (!getter(userdata, i, &entry))
 			continue;
+
+		if (entry.Start == 0)
+		{
+			entry.Start += 4096;
+			entry.Size  -= 4096;
+		}
 		if (entry.Size <= pmmRequiredSize)
 			continue;
 		pmmAllocatedIn = i;
@@ -223,42 +230,79 @@ void PMMSetupMemoryMap(size_t entryCount, PMMGetMemoryMapEntryFn getter, void* u
 		return;
 	}
 
-	g_PMM->MemoryMapCount  = entryCount;
-	g_PMM->MemoryMap       = (struct PMMMemoryMapEntry*) ((uint8_t*) g_PMM + sizeof(struct PMMState));
-	g_PMM->LastFreeAddress = lastFreeAddress;
-	g_PMM->LastAddress     = lastAddress;
-	g_PMM->PagesFree       = 0;
-	g_PMM->Bitmap          = (uint64_t*) ((uint8_t*) g_PMM + sizeof(struct PMMState) + sizeof(struct PMMMemoryMapEntry) * entryCount);
-	memset(g_PMM->Bitmap, 0, lastFreeAddress / 32768);
+	g_PMM->Stats = (struct PMMMemoryStats) {
+		.LastUsableAddress = lastUsableAddress,
+		.LastAddress       = lastAddress,
+		.PagesFree         = 0
+	};
+	g_PMM->MemoryMapCount = 0;
+	g_PMM->MemoryMap      = nullptr;
+	g_PMM->Bitmap         = (uint64_t*) (uint8_t*) g_PMM + sizeof(struct PMMState);
+	memset(g_PMM->Bitmap, 0, lastUsableAddress / 32768);
 	memset(g_PMM->SkipList, 0, sizeof(g_PMM->SkipList));
 
 	for (size_t i = 0; i < entryCount; ++i)
 	{
-		struct PMMMemoryMapEntry* entry = g_PMM->MemoryMap + i;
-		if (!getter(userdata, i, entry))
-		{
-			entry->Start = ~0UL;
-			entry->Size  = 0;
-			entry->Type  = PMMMemoryMapTypeInvalid;
+		struct PMMMemoryMapEntry entry;
+		if (!getter(userdata, i, &entry))
 			continue;
+
+		if (entry.Type != PMMMemoryMapTypeUsable)
+			continue;
+
+		if (entry.Start == 0)
+		{
+			entry.Start += 4096;
+			entry.Size  -= 4096;
 		}
 		if (pmmAllocatedIn == i)
 		{
-			entry->Start += pmmRequiredSize;
-			entry->Size  -= pmmRequiredSize;
+			entry.Start += pmmRequiredSize;
+			entry.Size  -= pmmRequiredSize;
 		}
-	}
-}
 
-void PMMInit()
-{
-	for (size_t i = 0; i < g_PMM->MemoryMapCount; ++i)
+		PMMFreeContiguous((void*) entry.Start, entry.Size / 4096);
+	}
+
+	g_PMM->MemoryMapCount    = entryCount + 2;
+	g_PMM->MemoryMap         = PMMAllocContiguous((g_PMM->MemoryMapCount + 4095) / 4096);
+	size_t curMemoryMapEntry = 0;
+	for (size_t i = 0; i < entryCount; ++i)
 	{
-		struct PMMMemoryMapEntry* entry = g_PMM->MemoryMap + i;
-		if (entry->Type != PMMMemoryMapTypeFree)
+		struct PMMMemoryMapEntry entry;
+		if (!getter(userdata, i, &entry))
 			continue;
 
-		PMMFreeContiguous((void*) entry->Start, entry->Size / 4096);
+		if (entry.Start == 0)
+		{
+			g_PMM->MemoryMap[curMemoryMapEntry++] = (struct PMMMemoryMapEntry) {
+				.Start = 0,
+				.Size  = 4096,
+				.Type  = PMMMemoryMapTypeNullGuard
+			};
+			entry.Start += 4096;
+			entry.Size  -= 4096;
+		}
+		if (pmmAllocatedIn == i)
+		{
+			g_PMM->MemoryMap[curMemoryMapEntry++] = (struct PMMMemoryMapEntry) {
+				.Start = entry.Start,
+				.Size  = pmmRequiredSize,
+				.Type  = PMMMemoryMapTypePMM
+			};
+			entry.Start += pmmRequiredSize;
+			entry.Size  -= pmmRequiredSize;
+		}
+		if (entry.Size > 0)
+		{
+			if (entry.Type == PMMMemoryMapTypeUsable)
+				entry.Type = PMMMemoryMapTypeTaken;
+			g_PMM->MemoryMap[curMemoryMapEntry++] = (struct PMMMemoryMapEntry) {
+				.Start = entry.Start,
+				.Size  = entry.Size,
+				.Type  = entry.Type
+			};
+		}
 	}
 }
 
@@ -266,19 +310,54 @@ void PMMReclaim()
 {
 	for (size_t i = 0; i < g_PMM->MemoryMapCount; ++i)
 	{
-		struct PMMMemoryMapEntry* entry = g_PMM->MemoryMap + i;
-		if (!(entry->Type & PMMMemoryMapTypeFree) || entry->Type == PMMMemoryMapTypeFree)
+		struct PMMMemoryMapEntry* entry = &g_PMM->MemoryMap[i];
+		if (!(entry->Type & PMMMemoryMapTypeUsable))
 			continue;
 
 		PMMFreeContiguous((void*) entry->Start, entry->Size / 4096);
+		entry->Type = PMMMemoryMapTypeTaken;
 	}
+	// TODO(MarcasRealAccount): Coalesce memory map entries
 }
 
 void PMMGetMemoryStats(struct PMMMemoryStats* stats)
 {
-	stats->LastFreeAddress = g_PMM->LastFreeAddress;
-	stats->LastAddress     = g_PMM->LastAddress;
-	stats->PagesFree       = g_PMM->PagesFree;
+	*stats = g_PMM->Stats;
+}
+
+size_t PMMGetMemoryMap(struct PMMMemoryMapEntry** entries)
+{
+	if (!entries)
+		return 0;
+	*entries = g_PMM->MemoryMap;
+	return g_PMM->MemoryMapCount;
+}
+
+void PMMPrintMemoryMap()
+{
+	DebugCon_WriteFormatted("Memory Map:\n");
+	for (size_t i = 0; i < g_PMM->MemoryMapCount; ++i)
+	{
+		struct PMMMemoryMapEntry* entry = &g_PMM->MemoryMap[i];
+		const char*               entryType;
+		switch (entry->Type)
+		{
+		case PMMMemoryMapTypeInvalid: entryType = "Invalid"; break;
+		case PMMMemoryMapTypeUsable: entryType = "Usable"; break;
+		case PMMMemoryMapTypeReclaimable: entryType = "Reclaimable"; break;
+		case PMMMemoryMapTypeLoaderReclaimable: entryType = "Loader Reclaimable"; break;
+		case PMMMemoryMapTypeTaken: entryType = "Taken"; break;
+		case PMMMemoryMapTypeNullGuard: entryType = "Null Guard"; break;
+		case PMMMemoryMapTypePMM: entryType = "PMM"; break;
+		case PMMMemoryMapTypeKernel: entryType = "Kernel"; break;
+		case PMMMemoryMapTypeModule: entryType = "Module"; break;
+		case PMMMemoryMapTypeReserved: entryType = "Reserved"; break;
+		case PMMMemoryMapTypeNVS: entryType = "NVS"; break;
+		default: entryType = "INVALID!!!"; break;
+		}
+
+		DebugCon_WriteFormatted("%20s: 0x%016lX -> 0x%016lX(%lu)\n", entryType, entry->Start, entry->Start + entry->Size, entry->Size / 4096);
+	}
 }
 
 void PMMPrintFreeList()
@@ -301,7 +380,7 @@ void* PMMAlloc()
 	PMMEraseFreeRange(header);
 	uint64_t page = (uint64_t) header / 4096;
 	PMMBitmapSetEntry(page, false);
-	--g_PMM->PagesFree;
+	--g_PMM->Stats.PagesFree;
 
 	if (header->Count > 1)
 	{
@@ -317,7 +396,7 @@ void PMMFree(void* address)
 	if (PMMBitmapGetEntry(page))
 		return;
 	PMMBitmapSetEntry(page, true);
-	++g_PMM->PagesFree;
+	++g_PMM->Stats.PagesFree;
 
 	uint64_t bottomPage = page;
 	uint64_t totalCount = 1;
@@ -342,6 +421,8 @@ void* PMMAllocContiguous(size_t count)
 {
 	if (count == 0)
 		return nullptr;
+	if (count == 1)
+		return PMMAlloc();
 
 	struct PMMFreeHeader* header = PMMFindFreeRange(count);
 	if (!header)
@@ -350,7 +431,7 @@ void* PMMAllocContiguous(size_t count)
 	uint64_t firstPage = (uint64_t) header / 4096;
 	uint64_t lastPage  = firstPage + count - 1;
 	PMMBitmapSetRange(firstPage, lastPage, false);
-	g_PMM->PagesFree -= count;
+	g_PMM->Stats.PagesFree -= count;
 
 	if (header->Count > count)
 	{
@@ -364,12 +445,14 @@ void PMMFreeContiguous(void* address, size_t count)
 {
 	if (count == 0)
 		return;
+	if (count == 1)
+		return PMMFree(address);
 
 	uint64_t firstPage = (uint64_t) address / 4096;
 	if (PMMBitmapGetEntry(firstPage))
 		return;
 	PMMBitmapSetRange(firstPage, firstPage + count - 1, true);
-	g_PMM->PagesFree += count;
+	g_PMM->Stats.PagesFree += count;
 
 	uint64_t bottomPage = firstPage;
 	uint64_t totalCount = count;

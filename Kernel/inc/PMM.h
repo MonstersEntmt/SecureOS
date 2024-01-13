@@ -6,13 +6,16 @@
 enum PMMMemoryMapType
 {
 	PMMMemoryMapTypeInvalid           = 0x00,
-	PMMMemoryMapTypeFree              = 0x01,
+	PMMMemoryMapTypeUsable            = 0x01,
 	PMMMemoryMapTypeReclaimable       = 0x11,
 	PMMMemoryMapTypeLoaderReclaimable = 0x21,
-	PMMMemoryMapTypeKernel            = 0x02,
-	PMMMemoryMapTypeModule            = 0x12,
-	PMMMemoryMapTypeReserved          = 0x04,
-	PMMMemoryMapTypeNVS               = 0x14
+	PMMMemoryMapTypeTaken             = 0x02,
+	PMMMemoryMapTypeNullGuard         = 0x12,
+	PMMMemoryMapTypePMM               = 0x22,
+	PMMMemoryMapTypeKernel            = 0x04,
+	PMMMemoryMapTypeModule            = 0x14,
+	PMMMemoryMapTypeReserved          = 0x08,
+	PMMMemoryMapTypeNVS               = 0x18
 };
 
 struct PMMMemoryMapEntry
@@ -25,18 +28,19 @@ struct PMMMemoryMapEntry
 
 struct PMMMemoryStats
 {
-	uint64_t LastFreeAddress;
+	uint64_t LastUsableAddress;
 	uint64_t LastAddress;
 	uint64_t PagesFree;
 };
 
 typedef bool (*PMMGetMemoryMapEntryFn)(void* userdata, size_t index, struct PMMMemoryMapEntry* entry);
 
-void PMMSetupMemoryMap(size_t entryCount, PMMGetMemoryMapEntryFn getter, void* userdata);
-void PMMInit();
-void PMMReclaim();
-void PMMGetMemoryStats(struct PMMMemoryStats* stats);
-void PMMPrintFreeList();
+void   PMMInit(size_t entryCount, PMMGetMemoryMapEntryFn getter, void* userdata);
+void   PMMReclaim();
+void   PMMGetMemoryStats(struct PMMMemoryStats* stats);
+size_t PMMGetMemoryMap(struct PMMMemoryMapEntry** entries);
+void   PMMPrintMemoryMap();
+void   PMMPrintFreeList();
 
 void* PMMAlloc();
 void  PMMFree(void* address);

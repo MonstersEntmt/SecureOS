@@ -8,6 +8,7 @@
 	#include "x86_64/GDT.h"
 	#include "x86_64/IDT.h"
 	#include "x86_64/InterruptHandlers.h"
+	#include "x86_64/KernelPageTable.h"
 #endif
 
 static void VisitUltraInvalidAttribute(void* userdata);
@@ -53,7 +54,12 @@ void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 		}
 	}
 
-	PMMInit();
+	PMMPrintMemoryMap();
+#if BUILD_IS_ARCH_X86_64
+	x86_64KPTInit();
+#endif
+	PMMReclaim();
+	PMMPrintMemoryMap();
 
 	void* singlePage = PMMAlloc();
 	DebugCon_WriteFormatted("Single Page: 0x%016X\r\n", singlePage);
@@ -137,7 +143,7 @@ static bool PMMUltraMemoryMapGetter(void* userdata, size_t index, struct PMMMemo
 	switch (mapentry->type)
 	{
 	case ULTRA_MEMORY_TYPE_INVALID: entry->Type = PMMMemoryMapTypeInvalid; break;
-	case ULTRA_MEMORY_TYPE_FREE: entry->Type = PMMMemoryMapTypeFree; break;
+	case ULTRA_MEMORY_TYPE_FREE: entry->Type = PMMMemoryMapTypeUsable; break;
 	case ULTRA_MEMORY_TYPE_RESERVED: entry->Type = PMMMemoryMapTypeReserved; break;
 	case ULTRA_MEMORY_TYPE_RECLAIMABLE: entry->Type = PMMMemoryMapTypeReclaimable; break;
 	case ULTRA_MEMORY_TYPE_NVS: entry->Type = PMMMemoryMapTypeNVS; break;
@@ -152,33 +158,34 @@ static bool PMMUltraMemoryMapGetter(void* userdata, size_t index, struct PMMMemo
 
 void VisitUltraMemoryMapAttribute(struct ultra_memory_map_attribute* attribute, void* userdata)
 {
-	DebugCon_WriteString("Memory Map:\r\n");
 	size_t entryCount = ULTRA_MEMORY_MAP_ENTRY_COUNT(attribute->header);
-	for (size_t i = 0; i < entryCount; ++i)
-	{
-		struct ultra_memory_map_entry* entry = attribute->entries + i;
-		const char*                    memoryType;
-		switch (entry->type)
-		{
-		case ULTRA_MEMORY_TYPE_INVALID: memoryType = "Invalid:"; break;
-		case ULTRA_MEMORY_TYPE_FREE: memoryType = "Free:"; break;
-		case ULTRA_MEMORY_TYPE_RESERVED: memoryType = "Reserved:"; break;
-		case ULTRA_MEMORY_TYPE_RECLAIMABLE: memoryType = "Reclaimable:"; break;
-		case ULTRA_MEMORY_TYPE_NVS: memoryType = "NVS:"; break;
-		case ULTRA_MEMORY_TYPE_LOADER_RECLAIMABLE: memoryType = "Loader Reclaimable:"; break;
-		case ULTRA_MEMORY_TYPE_MODULE: memoryType = "Module:"; break;
-		case ULTRA_MEMORY_TYPE_KERNEL_STACK: memoryType = "Kernel Stack:"; break;
-		case ULTRA_MEMORY_TYPE_KERNEL_BINARY: memoryType = "Kernel Binary:"; break;
-		default: memoryType = "Unknown:"; break;
-		}
-		DebugCon_WriteFormatted("  %-19s %016lx -> %016lx(%lu)\r\n",
-								memoryType,
-								entry->physical_address,
-								entry->physical_address + entry->size,
-								entry->size);
-	}
 
-	PMMSetupMemoryMap(entryCount, PMMUltraMemoryMapGetter, attribute);
+	// DebugCon_WriteString("Memory Map:\r\n");
+	// for (size_t i = 0; i < entryCount; ++i)
+	// {
+	// 	struct ultra_memory_map_entry* entry = attribute->entries + i;
+	// 	const char*                    memoryType;
+	// 	switch (entry->type)
+	// 	{
+	// 	case ULTRA_MEMORY_TYPE_INVALID: memoryType = "Invalid:"; break;
+	// 	case ULTRA_MEMORY_TYPE_FREE: memoryType = "Free:"; break;
+	// 	case ULTRA_MEMORY_TYPE_RESERVED: memoryType = "Reserved:"; break;
+	// 	case ULTRA_MEMORY_TYPE_RECLAIMABLE: memoryType = "Reclaimable:"; break;
+	// 	case ULTRA_MEMORY_TYPE_NVS: memoryType = "NVS:"; break;
+	// 	case ULTRA_MEMORY_TYPE_LOADER_RECLAIMABLE: memoryType = "Loader Reclaimable:"; break;
+	// 	case ULTRA_MEMORY_TYPE_MODULE: memoryType = "Module:"; break;
+	// 	case ULTRA_MEMORY_TYPE_KERNEL_STACK: memoryType = "Kernel Stack:"; break;
+	// 	case ULTRA_MEMORY_TYPE_KERNEL_BINARY: memoryType = "Kernel Binary:"; break;
+	// 	default: memoryType = "Unknown:"; break;
+	// 	}
+	// 	DebugCon_WriteFormatted("  %-19s %016lx -> %016lx(%lu)\r\n",
+	// 							memoryType,
+	// 							entry->physical_address,
+	// 							entry->physical_address + entry->size,
+	// 							entry->size);
+	// }
+
+	PMMInit(entryCount, PMMUltraMemoryMapGetter, attribute);
 }
 
 void VisitUltraModuleInfoAttribute(struct ultra_module_info_attribute* attribute, void* userdata)
