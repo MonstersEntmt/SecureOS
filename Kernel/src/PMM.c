@@ -323,6 +323,25 @@ void PMMReclaim()
 		entry->Type = PMMMemoryMapTypeTaken;
 	}
 	// TODO(MarcasRealAccount): Coalesce memory map entries
+
+	size_t                    moveCount = 0;
+	struct PMMMemoryMapEntry* pEntry    = &g_PMM->MemoryMap[0];
+	for (size_t i = 1; i < g_PMM->MemoryMapCount; ++i)
+	{
+		struct PMMMemoryMapEntry* entry = &g_PMM->MemoryMap[i];
+		if (entry->Type == pEntry->Type &&
+			entry->Start == pEntry->Start + pEntry->Size)
+		{
+			pEntry->Size += entry->Size;
+			++moveCount;
+		}
+		else
+		{
+			g_PMM->MemoryMap[i - moveCount] = *entry;
+			pEntry                          = &g_PMM->MemoryMap[i - moveCount];
+		}
+	}
+	g_PMM->MemoryMapCount -= moveCount;
 }
 
 void PMMGetMemoryStats(struct PMMMemoryStats* stats)
