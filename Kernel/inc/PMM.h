@@ -25,8 +25,10 @@ struct PMMMemoryMapEntry
 
 typedef bool (*PMMGetMemoryMapEntryFn)(void* userdata, size_t index, struct PMMMemoryMapEntry* entry);
 
-void  PMMInit(size_t entryCount, PMMGetMemoryMapEntryFn getter, void* userdata);
+void  PMMSetupMemoryMap(size_t entryCount, PMMGetMemoryMapEntryFn getter, void* userdata);
+void  PMMInit();
 void  PMMPrintFreeList();
+void  PMMPrintBitmap(uint64_t firstPage, uint64_t lastPage);
 void* PMMAlloc();
 void  PMMFree(void* address);
 void* PMMAllocContiguous(size_t count);

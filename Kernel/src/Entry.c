@@ -53,17 +53,16 @@ void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 		}
 	}
 
-	// PMMPrintFreeList();
+	PMMInit();
+	PMMPrintFreeList();
+
 	void* singlePage = PMMAlloc();
-	// PMMPrintFreeList();
+	PMMPrintFreeList();
 	DebugCon_WriteFormatted("Single Page: 0x%016X\r\n", singlePage);
 	void* multiplePages = PMMAllocContiguous(16);
-	// PMMPrintFreeList();
 	DebugCon_WriteFormatted("Multiple Pages: 0x%016X\r\n", multiplePages);
 	PMMFree(singlePage);
-	// PMMPrintFreeList();
 	PMMFreeContiguous(multiplePages, 16);
-	// PMMPrintFreeList();
 
 	CPUHalt();
 }
@@ -181,7 +180,7 @@ void VisitUltraMemoryMapAttribute(struct ultra_memory_map_attribute* attribute, 
 								entry->size);
 	}
 
-	PMMInit(entryCount, PMMUltraMemoryMapGetter, attribute);
+	PMMSetupMemoryMap(entryCount, PMMUltraMemoryMapGetter, attribute);
 }
 
 void VisitUltraModuleInfoAttribute(struct ultra_module_info_attribute* attribute, void* userdata)
