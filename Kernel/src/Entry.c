@@ -55,6 +55,7 @@ void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 	}
 
 	PMMPrintMemoryMap();
+	PMMPrintFreeList();
 #if BUILD_IS_ARCH_X86_64
 	x86_64KPTInit();
 #endif

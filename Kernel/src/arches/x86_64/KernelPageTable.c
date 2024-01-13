@@ -51,14 +51,14 @@ void x86_64KPTInit()
 	curPDP[nextPDPe++]   = 0x3 | ((uint64_t) curPD & 0x000F'FFFF'FFFF'F000UL);
 
 	uint64_t* lowerPT    = (uint64_t*) PMMAlloc();
-	size_t    last4KPage = memoryStats.LastAddress > 0x10'0000 ? 512 : memoryStats.LastAddress / 4096;
+	size_t    last4KPage = memoryStats.LastAddress > 0x20'0000 ? 512 : memoryStats.LastAddress / 4096;
 	lowerPT[0]           = 0;
 	for (size_t i = 1; i < last4KPage; ++i)
 		lowerPT[i] = 0x3 | (i << 12);
 	memset(lowerPT + last4KPage * 8, 0, (512 - last4KPage) * 8);
 
 	curPD[nextPDe++]    = 0x3 | ((uint64_t) lowerPT & 0x000F'FFFF'FFFF'F000UL);
-	uint64_t last2MPage = (memoryStats.LastAddress + 0xF'FFFF) / 0x10'0000;
+	uint64_t last2MPage = (memoryStats.LastAddress + 0x1F'FFFF) / 0x20'0000;
 	for (size_t i = 1; i < last2MPage; ++i)
 	{
 		curPD[nextPDe++] = 0x83 | (i << 21);

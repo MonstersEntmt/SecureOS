@@ -141,17 +141,21 @@ static void PMMInsertFreeRange(struct PMMFreeHeader* header)
 			other->Prev->Next = header;
 		header->Next = other;
 		header->Prev = other->Prev;
-		other->Prev  = header;
-		for (uint8_t i = index + 1; i-- > 0;)
+		// DebugCon_WriteFormatted("Inserting 0x%016lX such that 0x%016lX -> 0x%016lX -> 0x%016lX", (uint64_t) header, (uint64_t) other->Prev, (uint64_t) header, (uint64_t) other);
+		other->Prev = header;
+		uint8_t i   = index + 1;
+		for (; i-- > 0;)
 		{
 			if (g_PMM->SkipList[i] != other)
 				break;
 			g_PMM->SkipList[i] = header;
 		}
+		// DebugCon_WriteFormatted(" Filled SkipList from %u to %u\n", index, (uint8_t) (i + 1));
 		return;
 	}
 
-	for (uint8_t i = index + 1; i-- > 0;)
+	uint8_t i = index + 1;
+	for (; i-- > 0;)
 	{
 		if (g_PMM->SkipList[i])
 			break;
@@ -159,6 +163,7 @@ static void PMMInsertFreeRange(struct PMMFreeHeader* header)
 	}
 	if (g_PMM->Last)
 		g_PMM->Last->Next = header;
+	// DebugCon_WriteFormatted("Appending 0x%016lX such that 0x%016lX -> 0x%016lX -> nullptr Filled SkipList from %u to %u\n", (uint64_t) header, (uint64_t) g_PMM->Last, (uint64_t) header, index, (uint8_t) (i + 1));
 	header->Prev = g_PMM->Last;
 	header->Next = nullptr;
 	g_PMM->Last  = header;
@@ -204,7 +209,7 @@ void PMMInit(size_t entryCount, PMMGetMemoryMapEntryFn getter, void* userdata)
 			lastUsableAddress = entry.Start + entry.Size;
 	}
 
-	size_t pmmRequiredSize = sizeof(struct PMMState) + (lastUsableAddress / 32768); // (32768 = 4 KiB page size * 8 bits for bitmap)
+	size_t pmmRequiredSize = sizeof(struct PMMState) + ((lastUsableAddress + 32767) / 32768); // (32768 = 4 KiB page size * 8 bits for bitmap)
 	pmmRequiredSize        = (pmmRequiredSize + 4095) & ~0xFFFUL;
 	size_t pmmAllocatedIn  = ~0UL;
 	for (size_t i = 0; i < entryCount; ++i)
@@ -237,7 +242,7 @@ void PMMInit(size_t entryCount, PMMGetMemoryMapEntryFn getter, void* userdata)
 	};
 	g_PMM->MemoryMapCount = 0;
 	g_PMM->MemoryMap      = nullptr;
-	g_PMM->Bitmap         = (uint64_t*) (uint8_t*) g_PMM + sizeof(struct PMMState);
+	g_PMM->Bitmap         = (uint64_t*) ((uint8_t*) g_PMM + sizeof(struct PMMState));
 	memset(g_PMM->Bitmap, 0, lastUsableAddress / 32768);
 	memset(g_PMM->SkipList, 0, sizeof(g_PMM->SkipList));
 
@@ -454,6 +459,7 @@ void PMMFreeContiguous(void* address, size_t count)
 	PMMBitmapSetRange(firstPage, firstPage + count - 1, true);
 	g_PMM->Stats.PagesFree += count;
 
+	// DebugCon_WriteFormatted("Freeing   0x%016lX(%lu)", (uint64_t) address, count);
 	uint64_t bottomPage = firstPage;
 	uint64_t totalCount = count;
 	if (PMMBitmapGetEntry(firstPage - 1))
@@ -461,14 +467,17 @@ void PMMFreeContiguous(void* address, size_t count)
 		struct PMMFreeHeader* header = PMMGetFirstPage((struct PMMFreeHeader*) ((firstPage - 1) * 4096));
 		bottomPage                   = (uint64_t) header / 4096;
 		totalCount                  += header->Count;
+		// DebugCon_WriteFormatted(" Coalesce down %lu pages with 0x%016lX", header->Count, (uint64_t) header);
 		PMMEraseFreeRange(header);
 	}
 	if (PMMBitmapGetEntry(firstPage + count))
 	{
 		struct PMMFreeHeader* header = (struct PMMFreeHeader*) ((firstPage + count) * 4096);
 		totalCount                  += header->Count;
+		// DebugCon_WriteFormatted(" Coalesce up %lu pages", header->Count);
 		PMMEraseFreeRange(header);
 	}
+	// DebugCon_WriteFormatted(" Forming 0x%016lX -> 0x%016lX(%lu)\n", bottomPage * 4096, (bottomPage + totalCount) * 4096, totalCount);
 	PMMFillFreePages(bottomPage, bottomPage + totalCount - 1);
 	PMMInsertFreeRange((struct PMMFreeHeader*) (bottomPage * 4096));
 }
