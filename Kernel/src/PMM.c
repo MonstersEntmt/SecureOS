@@ -322,7 +322,6 @@ void PMMReclaim()
 		PMMFreeContiguous((void*) entry->Start, entry->Size / 4096);
 		entry->Type = PMMMemoryMapTypeTaken;
 	}
-	// TODO(MarcasRealAccount): Coalesce memory map entries
 
 	size_t                    moveCount = 0;
 	struct PMMMemoryMapEntry* pEntry    = &g_PMM->MemoryMap[0];
