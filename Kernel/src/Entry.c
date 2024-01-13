@@ -54,10 +54,8 @@ void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 	}
 
 	PMMInit();
-	PMMPrintFreeList();
 
 	void* singlePage = PMMAlloc();
-	PMMPrintFreeList();
 	DebugCon_WriteFormatted("Single Page: 0x%016X\r\n", singlePage);
 	void* multiplePages = PMMAllocContiguous(16);
 	DebugCon_WriteFormatted("Multiple Pages: 0x%016X\r\n", multiplePages);

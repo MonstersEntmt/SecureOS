@@ -23,12 +23,21 @@ struct PMMMemoryMapEntry
 	enum PMMMemoryMapType Type;
 };
 
+struct PMMMemoryStats
+{
+	uint64_t LastFreeAddress;
+	uint64_t LastAddress;
+	uint64_t PagesFree;
+};
+
 typedef bool (*PMMGetMemoryMapEntryFn)(void* userdata, size_t index, struct PMMMemoryMapEntry* entry);
 
-void  PMMSetupMemoryMap(size_t entryCount, PMMGetMemoryMapEntryFn getter, void* userdata);
-void  PMMInit();
-void  PMMPrintFreeList();
-void  PMMPrintBitmap(uint64_t firstPage, uint64_t lastPage);
+void PMMSetupMemoryMap(size_t entryCount, PMMGetMemoryMapEntryFn getter, void* userdata);
+void PMMInit();
+void PMMReclaim();
+void PMMGetMemoryStats(struct PMMMemoryStats* stats);
+void PMMPrintFreeList();
+
 void* PMMAlloc();
 void  PMMFree(void* address);
 void* PMMAllocContiguous(size_t count);
