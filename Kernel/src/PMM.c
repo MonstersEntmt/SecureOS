@@ -464,6 +464,40 @@ void* PMMAllocContiguous(size_t count)
 	return (void*) header;
 }
 
+void* PMMAllocContiguousAligned(size_t count, uint8_t alignment)
+{
+	if (count == 0)
+		return nullptr;
+	if (alignment <= 13)
+		return PMMAllocContiguous(count);
+
+	size_t alignmentVal  = 1UL << (alignment - 12);
+	size_t alignmentMask = alignmentVal - 1;
+
+	struct PMMFreeHeader* header = PMMFindFreeRange(count + alignmentVal);
+	if (!header)
+		return nullptr; // TODO(MarcasRealAccount): Maybe fall back to linear search?
+	PMMEraseFreeRange(header);
+	uint64_t headerPage    = (uint64_t) header / 4096;
+	uint64_t lastRangePage = headerPage + header->Count - 1;
+	uint64_t firstPage     = (headerPage + alignmentMask) & ~alignmentMask;
+	uint64_t lastPage      = firstPage + count - 1;
+	PMMBitmapSetRange(firstPage, lastPage, false);
+	g_PMM->Stats.PagesFree -= count;
+
+	if (headerPage != firstPage)
+	{
+		PMMFillFreePages(headerPage, firstPage - 1);
+		PMMInsertFreeRange(header);
+	}
+	if (lastPage != lastRangePage)
+	{
+		PMMFillFreePages(lastPage + 1, lastRangePage);
+		PMMInsertFreeRange((struct PMMFreeHeader*) ((lastPage + 1) * 4096));
+	}
+	return (void*) (firstPage * 4096);
+}
+
 void PMMFreeContiguous(void* address, size_t count)
 {
 	if (count == 0)

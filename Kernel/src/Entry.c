@@ -64,8 +64,11 @@ void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 	DebugCon_WriteFormatted("Single Page: 0x%016X\r\n", singlePage);
 	void* multiplePages = PMMAllocContiguous(16);
 	DebugCon_WriteFormatted("Multiple Pages: 0x%016X\r\n", multiplePages);
+	void* multipleAlignedPages = PMMAllocContiguousAligned(16, 23);
+	DebugCon_WriteFormatted("Multiple aligned Pages: 0x%016X\r\n", multipleAlignedPages);
 	PMMFree(singlePage);
 	PMMFreeContiguous(multiplePages, 16);
+	PMMFreeContiguous(multipleAlignedPages, 16);
 
 	CPUHalt();
 }

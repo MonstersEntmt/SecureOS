@@ -45,4 +45,5 @@ void   PMMPrintFreeList();
 void* PMMAlloc();
 void  PMMFree(void* address);
 void* PMMAllocContiguous(size_t count);
+void* PMMAllocContiguousAligned(size_t count, uint8_t alignment);
 void  PMMFreeContiguous(void* address, size_t count);
