@@ -3,6 +3,7 @@
 #include "Halt.h"
 #include "PMM.h"
 #include "Ultra/UltraProtocol.h"
+#include "VMM.h"
 
 #if BUILD_IS_ARCH_X86_64
 	#include "x86_64/GDT.h"
@@ -58,17 +59,22 @@ void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 	x86_64KPTInit();
 #endif
 	PMMReclaim();
-	PMMPrintMemoryMap();
 
-	void* singlePage = PMMAlloc();
+	{
+		struct PMMMemoryStats memoryStats;
+		PMMGetMemoryStats(&memoryStats);
+		DebugCon_WriteFormatted("PMM Stats:\n  Footprint: %lu\n  Last Usable Address: 0x%016lu\n  Last Address: 0x%016lu\n  Pages Free: %lu\n", (memoryStats.AllocatorFootprint + 4095) / 4096, memoryStats.LastUsableAddress, memoryStats.LastAddress, memoryStats.PagesFree);
+	}
+
+	void* singlePage = PMMAlloc(1);
 	DebugCon_WriteFormatted("Single Page: 0x%016X\r\n", singlePage);
-	void* multiplePages = PMMAllocContiguous(16);
+	void* multiplePages = PMMAlloc(16);
 	DebugCon_WriteFormatted("Multiple Pages: 0x%016X\r\n", multiplePages);
-	void* multipleAlignedPages = PMMAllocContiguousAligned(16, 23);
+	void* multipleAlignedPages = PMMAllocAligned(16, 23);
 	DebugCon_WriteFormatted("Multiple aligned Pages: 0x%016X\r\n", multipleAlignedPages);
-	PMMFree(singlePage);
-	PMMFreeContiguous(multiplePages, 16);
-	PMMFreeContiguous(multipleAlignedPages, 16);
+	PMMFree(singlePage, 1);
+	PMMFree(multiplePages, 16);
+	PMMFree(multipleAlignedPages, 16);
 
 	CPUHalt();
 }

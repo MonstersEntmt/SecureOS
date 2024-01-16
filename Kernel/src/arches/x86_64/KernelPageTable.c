@@ -20,7 +20,7 @@ void x86_64KPTInit()
 	PMMGetMemoryStats(&memoryStats);
 
 	g_KPT.IsLvl5    = false; // TODO(MarcasRealAccount): Determine if cpu supports level 5
-	g_KPT.BaseTable = (uint64_t*) PMMAlloc();
+	g_KPT.BaseTable = (uint64_t*) PMMAlloc(1);
 
 	uint16_t nextPML5e = 0;
 	uint16_t nextPML4e = 0;
@@ -32,7 +32,7 @@ void x86_64KPTInit()
 	if (g_KPT.IsLvl5)
 	{
 		curPML5 = g_KPT.BaseTable;
-		curPML4 = (uint64_t*) PMMAlloc();
+		curPML4 = (uint64_t*) PMMAlloc(1);
 		memset(curPML5, 0, 4096);
 		memset(curPML4, 0, 4096);
 		curPML5[nextPML5e++] = 0x3 | ((uint64_t) curPML4 & 0x000F'FFFF'FFFF'F000UL);
@@ -43,14 +43,14 @@ void x86_64KPTInit()
 		curPML4 = g_KPT.BaseTable;
 		memset(curPML4, 0, 4096);
 	}
-	uint64_t* curPDP = (uint64_t*) PMMAlloc();
-	uint64_t* curPD  = (uint64_t*) PMMAlloc();
+	uint64_t* curPDP = (uint64_t*) PMMAlloc(1);
+	uint64_t* curPD  = (uint64_t*) PMMAlloc(1);
 	memset(curPDP, 0, 4096);
 	memset(curPD, 0, 4096);
 	curPML4[nextPML4e++] = 0x3 | ((uint64_t) curPDP & 0x000F'FFFF'FFFF'F000UL);
 	curPDP[nextPDPe++]   = 0x3 | ((uint64_t) curPD & 0x000F'FFFF'FFFF'F000UL);
 
-	uint64_t* lowerPT    = (uint64_t*) PMMAlloc();
+	uint64_t* lowerPT    = (uint64_t*) PMMAlloc(1);
 	size_t    last4KPage = memoryStats.LastAddress > 0x20'0000 ? 512 : memoryStats.LastAddress / 4096;
 	lowerPT[0]           = 0;
 	for (size_t i = 1; i < last4KPage; ++i)
@@ -66,7 +66,7 @@ void x86_64KPTInit()
 			continue;
 
 		nextPDe = 0;
-		curPD   = (uint64_t*) PMMAlloc();
+		curPD   = (uint64_t*) PMMAlloc(1);
 		memset(curPD, 0, 4096);
 		curPDP[nextPDPe++] = 0x3 | ((uint64_t) curPD & 0x000F'FFFF'FFFF'F000UL);
 		if (nextPDPe < 512)
@@ -79,7 +79,7 @@ void x86_64KPTInit()
 		}
 
 		nextPDPe = 0;
-		curPDP   = (uint64_t*) PMMAlloc();
+		curPDP   = (uint64_t*) PMMAlloc(1);
 		memset(curPDP, 0, 4096);
 		curPML4[nextPML4e++] = 0x3 | ((uint64_t) curPDP & 0x000F'FFFF'FFFF'F000UL);
 		if (!g_KPT.IsLvl5 || nextPML4e < 512)
@@ -92,7 +92,7 @@ void x86_64KPTInit()
 		}
 
 		nextPML4e = 0;
-		curPML4   = (uint64_t*) PMMAlloc();
+		curPML4   = (uint64_t*) PMMAlloc(1);
 		memset(curPML4, 0, 4096);
 		curPML5[nextPML5e++] = 0x3 | ((uint64_t) curPML4 & 0x000F'FFFF'FFFF'F000UL);
 	}

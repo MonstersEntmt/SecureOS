@@ -28,6 +28,8 @@ struct PMMMemoryMapEntry
 
 struct PMMMemoryStats
 {
+	uint64_t AllocatorFootprint;
+
 	uint64_t LastUsableAddress;
 	uint64_t LastAddress;
 	uint64_t PagesFree;
@@ -38,12 +40,8 @@ typedef bool (*PMMGetMemoryMapEntryFn)(void* userdata, size_t index, struct PMMM
 void   PMMInit(size_t entryCount, PMMGetMemoryMapEntryFn getter, void* userdata);
 void   PMMReclaim();
 void   PMMGetMemoryStats(struct PMMMemoryStats* stats);
-size_t PMMGetMemoryMap(struct PMMMemoryMapEntry** entries);
-void   PMMPrintMemoryMap();
-void   PMMPrintFreeList();
+size_t PMMGetMemoryMap(const struct PMMMemoryMapEntry** entries);
 
-void* PMMAlloc();
-void  PMMFree(void* address);
-void* PMMAllocContiguous(size_t count);
-void* PMMAllocContiguousAligned(size_t count, uint8_t alignment);
-void  PMMFreeContiguous(void* address, size_t count);
+void* PMMAlloc(size_t count);
+void* PMMAllocAligned(size_t count, uint8_t alignment);
+void  PMMFree(void* address, size_t count);
