@@ -1,6 +1,7 @@
 #include "Build.h"
 #include "DebugCon.h"
 #include "Halt.h"
+#include "KernelVMM.h"
 #include "PMM.h"
 #include "Ultra/UltraProtocol.h"
 #include "VMM.h"
@@ -9,9 +10,6 @@
 	#include "x86_64/GDT.h"
 	#include "x86_64/IDT.h"
 	#include "x86_64/InterruptHandlers.h"
-	#include "x86_64/KernelPageTable.h"
-
-extern void x86_64KPTSetCR3(uint64_t cr3, bool isLvl5);
 #endif
 
 static void VisitUltraInvalidAttribute(void* userdata);
@@ -57,48 +55,20 @@ void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 		}
 	}
 
-#if BUILD_IS_ARCH_X86_64
-	x86_64KPTInit();
-#endif
+	KernelVMMInit();
 	PMMReclaim();
 
-	uint64_t lastAddress = 0;
 	{
 		struct PMMMemoryStats memoryStats;
 		PMMGetMemoryStats(&memoryStats);
-		lastAddress = memoryStats.LastAddress;
 		DebugCon_WriteFormatted("PMM Stats:\n  Footprint: %lu\n  Last Usable Address: 0x%016lu\n  Last Address: 0x%016lu\n  Pages Free: %lu\n", (memoryStats.AllocatorFootprint + 4095) / 4096, memoryStats.LastUsableAddress, memoryStats.LastAddress, memoryStats.PagesFree);
 	}
 
-	void* pageTable = VMMNewPageTable();
-	if (!pageTable)
-		CPUHalt();
-
-	DebugCon_WriteFormatted("VMM Allocated at 0x%016lX\n", (uint64_t) pageTable);
-
-	uint64_t last4KPage        = lastAddress > 0x20'0000 ? 512 : lastAddress / 4096;
-	uint64_t last2MPage        = (lastAddress + 0x1F'FFFF) / 0x20'0000;
-	void*    identityBegin4KiB = VMMAllocAt(pageTable, 0x1000, last4KPage - 1, VMM_PAGE_TYPE_4KIB, VMM_PAGE_PROTECT_READ_WRITE_EXECUTE);
-	void*    identityBegin2MiB = VMMAllocAt(pageTable, last4KPage * 4096, (last2MPage - 1) * 512, VMM_PAGE_TYPE_2MIB, VMM_PAGE_PROTECT_READ_WRITE_EXECUTE);
-	DebugCon_WriteFormatted("Identity Begin 4KiB: 0x%016lX\n", identityBegin4KiB);
-	DebugCon_WriteFormatted("Identity Begin 2MiB: 0x%016lX\n", identityBegin2MiB);
-	VMMMapLinear(pageTable, identityBegin4KiB, (void*) 0x1000, last4KPage - 1);
-	VMMMapLinear(pageTable, identityBegin2MiB, (void*) 0x20'0000, (last2MPage - 1) * 512);
-
 	{
 		struct VMMMemoryStats memoryStats;
-		VMMGetMemoryStats(pageTable, &memoryStats);
-		DebugCon_WriteFormatted("VMM Stats:\n  Footprint: %lu\n  Pages Allocated: %lu\n", (memoryStats.AllocatorFootprint + 4095) / 4096, memoryStats.PagesAllocated);
+		VMMGetMemoryStats(GetKernelPageTable(), &memoryStats);
+		DebugCon_WriteFormatted("Kernel VMM Stats:\n  Footprint: %lu\n  Pages Allocated: %lu\n", (memoryStats.AllocatorFootprint + 4095) / 4096, memoryStats.PagesAllocated);
 	}
-
-#if BUILD_IS_ARCH_X86_64
-	x86_64KPTSetCR3((uint64_t) (((uint64_t*) pageTable)[3]) & 0x000F'FFFF'FFFF'F000UL, false);
-#endif
-
-	VMMFree(pageTable, identityBegin4KiB, last4KPage - 1);
-	VMMFree(pageTable, identityBegin2MiB, (last2MPage - 1) * 512);
-
-	VMMFreePageTable(pageTable);
 
 	CPUHalt();
 }

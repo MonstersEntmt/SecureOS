@@ -44,6 +44,7 @@ extern uint64_t  VMMArchConstructPageTableEntry(uint64_t physicalAddress, enum V
 extern uint64_t  VMMArchConstructPageTablePointer(uint64_t* subTableAddress);
 extern void      VMMArchGetPageTableEntry(uint64_t entry, uint8_t level, uint64_t* physicalAddress, enum VMMPageType* type, enum VMMPageProtect* protect);
 extern uint64_t* VMMArchGetPageTablePointer(uint64_t entry);
+extern void      VMMArchActivate(uint64_t* pageTableRoot, uint8_t levels, bool use1GiB);
 
 static uint64_t VMMGetLUTValue(uint8_t index)
 {
@@ -777,6 +778,15 @@ void VMMMapLinear(void* pageTable, void* virtualAddress, void* physicalAddress, 
 	uint64_t firstPage = (uint64_t) virtualAddress / 4096;
 	uint64_t lastPage  = firstPage + count - 1;
 	VMMPageTableMapLinear((struct VMMState*) pageTable, firstPage, lastPage, (uint64_t) physicalAddress);
+}
+
+void VMMActivate(void* pageTable)
+{
+	if (!pageTable)
+		return;
+
+	struct VMMState* state = (struct VMMState*) pageTable;
+	VMMArchActivate(state->PageTableRoot, state->Levels, state->Supports1GiB);
 }
 
 #endif
