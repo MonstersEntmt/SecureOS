@@ -5,9 +5,9 @@ uint64_t VMMArchConstructPageTableEntry(void* physicalAddress, enum VMMPageType 
 	uint64_t entry = physicalAddress != nullptr ? 1 : 0;
 	switch (type)
 	{
-	case VMM_PAGE_TYPE_4KIB: entry = (uint64_t) physicalAddress & 0xF'FFFF'FFFF'F000UL; break;
-	case VMM_PAGE_TYPE_2MIB: entry = (uint64_t) physicalAddress & 0xF'FFFF'FFE0'0000UL | 0x80; break;
-	case VMM_PAGE_TYPE_1GIB: entry = (uint64_t) physicalAddress & 0xF'FFFF'C000'0000UL | 0x80; break;
+	case VMM_PAGE_TYPE_4KIB: entry |= (uint64_t) physicalAddress & 0xF'FFFF'FFFF'F000UL; break;
+	case VMM_PAGE_TYPE_2MIB: entry |= (uint64_t) physicalAddress & 0xF'FFFF'FFE0'0000UL | 0x80; break;
+	case VMM_PAGE_TYPE_1GIB: entry |= (uint64_t) physicalAddress & 0xF'FFFF'C000'0000UL | 0x80; break;
 	}
 	switch (protect)
 	{
@@ -24,24 +24,47 @@ uint64_t VMMArchConstructPageTablePointer(uint64_t* subTableAddress)
 	return 0x3 | ((uint64_t) subTableAddress & 0xF'FFFF'FFFF'F000UL);
 }
 
-void VMMArchGetPageTableEntry(uint64_t entry, uint8_t level, void** physicalAddress, enum VMMPageType* type)
+void VMMArchGetPageTableEntry(uint64_t entry, uint8_t level, void** physicalAddress, enum VMMPageType* type, enum VMMPageProtect* protect)
 {
-	if (!physicalAddress || !type)
-		return;
 	if (level == 0)
 	{
-		*physicalAddress = (void*) (entry & 0xF'FFFF'FFFF'F000UL);
-		*type            = VMM_PAGE_TYPE_4KIB;
+		if (physicalAddress)
+			*physicalAddress = (void*) (entry & 0xF'FFFF'FFFF'F000UL);
+		if (type)
+			*type = VMM_PAGE_TYPE_4KIB;
 	}
 	else if (level == 1)
 	{
-		*physicalAddress = (void*) (entry & 0xF'FFFF'FFE0'0000UL);
-		*type            = VMM_PAGE_TYPE_2MIB;
+		if (physicalAddress)
+			*physicalAddress = (void*) (entry & 0xF'FFFF'FFE0'0000UL);
+		if (type)
+			*type = VMM_PAGE_TYPE_2MIB;
 	}
 	else if (level == 2)
 	{
-		*physicalAddress = (void*) (entry & 0xF'FFFF'C000'0000UL);
-		*type            = VMM_PAGE_TYPE_1GIB;
+		if (physicalAddress)
+			*physicalAddress = (void*) (entry & 0xF'FFFF'C000'0000UL);
+		if (type)
+			*type = VMM_PAGE_TYPE_1GIB;
+	}
+
+	if (protect)
+	{
+		if (entry & 0x8000'0000'0000'0000UL)
+		{
+			if (entry & 2)
+				*protect = VMM_PAGE_PROTECT_READ_WRITE;
+			else
+				*protect = VMM_PAGE_PROTECT_READ_ONLY;
+		}
+		else if (entry & 2)
+		{
+			*protect = VMM_PAGE_PROTECT_READ_WRITE_EXECUTE;
+		}
+		else
+		{
+			*protect = VMM_PAGE_PROTECT_READ_EXECUTE;
+		}
 	}
 }
 

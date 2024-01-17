@@ -40,9 +40,9 @@ struct VMMState
 	struct VMMFreeEntry* LUT[255];
 };
 
-extern uint64_t  VMMArchConstructPageTableEntry(void* physicalAddress, enum VMMPageType type, enum VMMPageProtect protect);
+extern uint64_t  VMMArchConstructPageTableEntry(uint64_t physicalAddress, enum VMMPageType type, enum VMMPageProtect protect);
 extern uint64_t  VMMArchConstructPageTablePointer(uint64_t* subTableAddress);
-extern void      VMMArchGetPageTableEntry(uint64_t entry, uint8_t level, void** physicalAddress, enum VMMPageType* type);
+extern void      VMMArchGetPageTableEntry(uint64_t entry, uint8_t level, uint64_t* physicalAddress, enum VMMPageType* type, enum VMMPageProtect* protect);
 extern uint64_t* VMMArchGetPageTablePointer(uint64_t entry);
 
 static uint64_t VMMGetLUTValue(uint8_t index)
@@ -68,19 +68,85 @@ static uint8_t VMMGetLUTCeilIndex(uint64_t value)
 
 static void VMMPageTableFreeRecursively(struct VMMState* state, uint64_t* pageTable, uint64_t* freeTable, uint8_t level)
 {
-	if (level > 0)
+	for (uint16_t i = 0; i < 512; ++i)
 	{
-		for (uint16_t i = 0; i < 512; ++i)
+		uint64_t freeEntry = freeTable[i];
+		switch (freeEntry)
 		{
-			uint64_t freeEntry = freeTable[i];
-			if (!(freeEntry & 1))
-				continue;
+		case 0b00: break;
+		case 0b01:
 			VMMPageTableFreeRecursively(state, (uint64_t*) (pageTable[i] & 0xF'FFFF'FFFF'F000UL), (uint64_t*) (freeEntry & 0xF'FFFF'FFFF'F000UL), level - 1);
+			break;
+		case 0b10:
+		case 0b11: break;
 		}
 	}
 	PMMFree(pageTable, 1);
 	PMMFree(freeTable, 1);
 	state->Stats.AllocatorFootprint -= 8192;
+}
+
+static void VMMPageTableMap(struct VMMState* state, uint64_t page, uint64_t physicalAddress)
+{
+	uint64_t* pageTable = state->PageTableRoot;
+	uint64_t* freeTable = state->FreeTableRoot;
+	for (uint8_t i = state->Levels; i-- > 0;)
+	{
+		uint16_t entry     = (page >> (9 * i)) & 511;
+		uint64_t freeEntry = freeTable[entry];
+		switch (freeEntry & 3)
+		{
+		case 0b00: return;
+		case 0b01:
+			pageTable = VMMArchGetPageTablePointer(pageTable[entry]);
+			freeTable = (uint64_t*) (freeEntry & 0xF'FFFF'FFFF'F000UL);
+			break;
+		case 0b10:
+		case 0b11:
+			enum VMMPageType    type;
+			enum VMMPageProtect protect;
+			VMMArchGetPageTableEntry(pageTable[entry], i, nullptr, &type, &protect);
+			pageTable[i] = VMMArchConstructPageTableEntry(physicalAddress, type, protect);
+			return;
+		}
+	}
+}
+
+static uint64_t VMMPageTableMapLinearRecursive(struct VMMState* state, uint64_t* pageTable, uint64_t* freeTable, uint64_t firstPage, uint64_t lastPage, uint64_t physicalAddress, uint8_t level)
+{
+	uint16_t firstEntry = (firstPage >> (9 * level)) & 511;
+	uint16_t lastEntry  = (lastPage >> (9 * level)) & 511;
+	for (uint16_t i = firstEntry; i <= lastEntry; ++i)
+	{
+		uint64_t freeEntry = freeTable[i];
+		switch (freeEntry & 3)
+		{
+		case 0b00: break;
+		case 0b01:
+		{
+			uint64_t firstSubPage = i == firstEntry ? firstPage - (i << (9 * level)) : 0;
+			uint64_t lastSubPage  = i != lastEntry ? (1 << (9 * level)) - 1 : lastPage - (i << (9 * level));
+			physicalAddress       = VMMPageTableMapLinearRecursive(state, VMMArchGetPageTablePointer(pageTable[i]), (uint64_t*) (freeEntry & 0xF'FFFF'FFFF'F0UL), firstSubPage, lastSubPage, physicalAddress, level - 1);
+			break;
+		}
+		case 0b10:
+		case 0b11:
+		{
+			enum VMMPageType    type;
+			enum VMMPageProtect protect;
+			VMMArchGetPageTableEntry(pageTable[i], level, nullptr, &type, &protect);
+			pageTable[i]     = VMMArchConstructPageTableEntry(physicalAddress, type, protect);
+			physicalAddress += 4096 << (9 * level);
+			break;
+		}
+		}
+	}
+	return physicalAddress;
+}
+
+static void VMMPageTableMapLinear(struct VMMState* state, uint64_t firstPage, uint64_t lastPage, uint64_t physicalAddress)
+{
+	VMMPageTableMapLinearRecursive(state, state->PageTableRoot, state->FreeTableRoot, firstPage, lastPage, physicalAddress, state->Levels - 1);
 }
 
 static void VMMPageTableFillProtectRecursive(struct VMMState* state, uint64_t* pageTable, uint64_t* freeTable, uint64_t firstPage, uint64_t lastPage, enum VMMPageProtect protect, uint8_t level)
@@ -90,21 +156,25 @@ static void VMMPageTableFillProtectRecursive(struct VMMState* state, uint64_t* p
 	for (uint16_t i = firstEntry; i <= lastEntry; ++i)
 	{
 		uint64_t freeEntry = freeTable[i];
-		if (freeEntry & 1)
+		switch (freeEntry & 3)
 		{
-			if (freeEntry & 2)
-			{
-				void*            physicalAddress;
-				enum VMMPageType type;
-				VMMArchGetPageTableEntry(pageTable[i], level, &physicalAddress, &type);
-				pageTable[i] = VMMArchConstructPageTableEntry(physicalAddress, type, protect);
-			}
-			else
-			{
-				uint64_t firstSubPage = firstPage - (i << (9 * level));
-				uint64_t lastSubPage  = i != lastPage ? firstSubPage + (1 << (9 * level)) : lastPage - (i << (9 * level));
-				VMMPageTableFillProtectRecursive(state, VMMArchGetPageTablePointer(pageTable[i]), (uint64_t*) (freeEntry & 0xF'FFFF'FFFF'F0UL), firstSubPage, lastSubPage, protect, level - 1);
-			}
+		case 0b00: break;
+		case 0b01:
+		{
+			uint64_t firstSubPage = i == firstEntry ? firstPage - (i << (9 * level)) : 0;
+			uint64_t lastSubPage  = i != lastEntry ? (1 << (9 * level)) - 1 : lastPage - (i << (9 * level));
+			VMMPageTableFillProtectRecursive(state, VMMArchGetPageTablePointer(pageTable[i]), (uint64_t*) (freeEntry & 0xF'FFFF'FFFF'F0UL), firstSubPage, lastSubPage, protect, level - 1);
+			break;
+		}
+		case 0b10:
+		case 0b11:
+		{
+			uint64_t         physicalAddress;
+			enum VMMPageType type;
+			VMMArchGetPageTableEntry(pageTable[i], level, &physicalAddress, &type, nullptr);
+			pageTable[i] = VMMArchConstructPageTableEntry(physicalAddress, type, protect);
+			break;
+		}
 		}
 	}
 }
@@ -130,7 +200,7 @@ static void VMMPageTableFillUsedRecursive(struct VMMState* state, uint64_t* page
 	{
 		for (uint16_t i = firstEntry; i <= lastEntry; ++i)
 		{
-			pageTable[i] = VMMArchConstructPageTableEntry(nullptr, type, protect);
+			pageTable[i] = VMMArchConstructPageTableEntry(0, type, protect);
 			freeTable[i] = 3; // TODO(MarcasRealAccount): Perhaps store allocated page information?
 		}
 	}
@@ -182,8 +252,8 @@ static void VMMPageTableFillUsedRecursive(struct VMMState* state, uint64_t* page
 				state->Stats.AllocatorFootprint += 8192;
 			}
 
-			uint64_t firstSubPage = firstPage - (i << (9 * level));
-			uint64_t lastSubPage  = i != lastPage ? firstSubPage + (1 << (9 * level)) : lastPage - (i << (9 * level));
+			uint64_t firstSubPage = i == firstEntry ? firstPage - (i << (9 * level)) : 0;
+			uint64_t lastSubPage  = i != lastEntry ? (1 << (9 * level)) - 1 : lastPage - (i << (9 * level));
 			VMMPageTableFillUsedRecursive(state, nextPageTable, nextFreeTable, firstSubPage, lastSubPage, type, protect, level - 1);
 		}
 	}
@@ -689,6 +759,24 @@ void VMMProtect(void* pageTable, void* virtualAddress, size_t count, enum VMMPag
 	uint64_t firstPage = (uint64_t) virtualAddress / 4096;
 	uint64_t lastPage  = firstPage + count - 1;
 	VMMPageTableFillProtect((struct VMMState*) pageTable, firstPage, lastPage, protect);
+}
+
+void VMMMap(void* pageTable, void* virtualAddress, void* physicalAddress)
+{
+	if (!pageTable)
+		return;
+
+	VMMPageTableMap((struct VMMState*) pageTable, (uint64_t) virtualAddress / 4096, (uint64_t) physicalAddress);
+}
+
+void VMMMapLinear(void* pageTable, void* virtualAddress, void* physicalAddress, size_t count)
+{
+	if (!pageTable)
+		return;
+
+	uint64_t firstPage = (uint64_t) virtualAddress / 4096;
+	uint64_t lastPage  = firstPage + count - 1;
+	VMMPageTableMapLinear((struct VMMState*) pageTable, firstPage, lastPage, (uint64_t) physicalAddress);
 }
 
 #endif

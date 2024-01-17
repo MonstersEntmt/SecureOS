@@ -62,21 +62,13 @@ void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 #endif
 	PMMReclaim();
 
+	uint64_t lastAddress = 0;
 	{
 		struct PMMMemoryStats memoryStats;
 		PMMGetMemoryStats(&memoryStats);
+		lastAddress = memoryStats.LastAddress;
 		DebugCon_WriteFormatted("PMM Stats:\n  Footprint: %lu\n  Last Usable Address: 0x%016lu\n  Last Address: 0x%016lu\n  Pages Free: %lu\n", (memoryStats.AllocatorFootprint + 4095) / 4096, memoryStats.LastUsableAddress, memoryStats.LastAddress, memoryStats.PagesFree);
 	}
-
-	void* singlePage = PMMAlloc(1);
-	DebugCon_WriteFormatted("Single Page: 0x%016lX\r\n", singlePage);
-	void* multiplePages = PMMAlloc(16);
-	DebugCon_WriteFormatted("Multiple Pages: 0x%016lX\r\n", multiplePages);
-	void* multipleAlignedPages = PMMAllocAligned(16, 23);
-	DebugCon_WriteFormatted("Multiple aligned Pages: 0x%016lX\r\n", multipleAlignedPages);
-	PMMFree(singlePage, 1);
-	PMMFree(multiplePages, 16);
-	PMMFree(multipleAlignedPages, 16);
 
 	void* pageTable = VMMNewPageTable();
 	if (!pageTable)
@@ -84,14 +76,14 @@ void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 
 	DebugCon_WriteFormatted("VMM Allocated at 0x%016lX\n", (uint64_t) pageTable);
 
-	void* virtualSinglePage = VMMAlloc(pageTable, 1, 12, VMM_PAGE_TYPE_4KIB, VMM_PAGE_PROTECT_READ_WRITE_EXECUTE);
-	DebugCon_WriteFormatted("Single Page: 0x%016lX\r\n", virtualSinglePage);
-	void* virtualMultiplePages = VMMAlloc(pageTable, 16, 12, VMM_PAGE_TYPE_4KIB, VMM_PAGE_PROTECT_READ_WRITE_EXECUTE);
-	DebugCon_WriteFormatted("Multiple Pages: 0x%016lX\r\n", virtualMultiplePages);
-	void* virtualMultipleAlignedPages = VMMAlloc(pageTable, 16, 23, VMM_PAGE_TYPE_4KIB, VMM_PAGE_PROTECT_READ_WRITE_EXECUTE);
-	DebugCon_WriteFormatted("Multiple aligned Pages: 0x%016lX\r\n", virtualMultipleAlignedPages);
-	void* virtualPagesAt = VMMAllocAt(pageTable, 0x8000'0000'0000UL, 16, VMM_PAGE_TYPE_4KIB, VMM_PAGE_PROTECT_READ_WRITE_EXECUTE);
-	DebugCon_WriteFormatted("Pages At: 0x%016lX\r\n", virtualPagesAt);
+	uint64_t last4KPage        = lastAddress > 0x20'0000 ? 512 : lastAddress / 4096;
+	uint64_t last2MPage        = (lastAddress + 0x1F'FFFF) / 0x20'0000;
+	void*    identityBegin4KiB = VMMAllocAt(pageTable, 0x1000, last4KPage - 1, VMM_PAGE_TYPE_4KIB, VMM_PAGE_PROTECT_READ_WRITE_EXECUTE);
+	void*    identityBegin2MiB = VMMAllocAt(pageTable, last4KPage * 4096, (last2MPage - 1) * 512, VMM_PAGE_TYPE_2MIB, VMM_PAGE_PROTECT_READ_WRITE_EXECUTE);
+	DebugCon_WriteFormatted("Identity Begin 4KiB: 0x%016lX\n", identityBegin4KiB);
+	DebugCon_WriteFormatted("Identity Begin 2MiB: 0x%016lX\n", identityBegin2MiB);
+	VMMMapLinear(pageTable, identityBegin4KiB, (void*) 0x1000, last4KPage - 1);
+	VMMMapLinear(pageTable, identityBegin2MiB, (void*) 0x20'0000, (last2MPage - 1) * 512);
 
 	{
 		struct VMMMemoryStats memoryStats;
@@ -99,10 +91,12 @@ void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 		DebugCon_WriteFormatted("VMM Stats:\n  Footprint: %lu\n  Pages Allocated: %lu\n", (memoryStats.AllocatorFootprint + 4095) / 4096, memoryStats.PagesAllocated);
 	}
 
-	VMMFree(pageTable, virtualSinglePage, 1);
-	VMMFree(pageTable, virtualMultiplePages, 16);
-	VMMFree(pageTable, virtualMultipleAlignedPages, 16);
-	VMMFree(pageTable, virtualPagesAt, 16);
+#if BUILD_IS_ARCH_X86_64
+	x86_64KPTSetCR3((uint64_t) (((uint64_t*) pageTable)[3]) & 0x000F'FFFF'FFFF'F000UL, false);
+#endif
+
+	VMMFree(pageTable, identityBegin4KiB, last4KPage - 1);
+	VMMFree(pageTable, identityBegin2MiB, (last2MPage - 1) * 512);
 
 	VMMFreePageTable(pageTable);
 
