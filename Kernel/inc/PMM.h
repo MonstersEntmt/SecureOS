@@ -41,6 +41,7 @@ void   PMMInit(size_t entryCount, PMMGetMemoryMapEntryFn getter, void* userdata)
 void   PMMReclaim();
 void   PMMGetMemoryStats(struct PMMMemoryStats* stats);
 size_t PMMGetMemoryMap(const struct PMMMemoryMapEntry** entries);
+void   PMMDebugPrint();
 
 void* PMMAlloc(size_t count);
 void* PMMAllocAligned(size_t count, uint8_t alignment);

@@ -1,3 +1,4 @@
+#include "DebugCon.h"
 #define PMM_USE_FREELIST_LUT 1
 
 // TODO(MarcasRealAccount): Implement allocator selection as a runtime option through the commandline
@@ -173,6 +174,14 @@ static void PMMEraseFreeRange(struct PMMFreeHeader* header)
 
 static struct PMMFreeHeader* PMMTakeFreeRange(uint64_t count)
 {
+	if (count == 1)
+	{
+		struct PMMFreeHeader* header = g_PMM->LUT[0];
+		if (header)
+			PMMEraseFreeRange(header);
+		return header;
+	}
+
 	uint8_t index = PMMGetLUTCeilIndex(count);
 	if (g_PMM->LUT[index])
 	{
@@ -368,6 +377,60 @@ size_t PMMGetMemoryMap(const struct PMMMemoryMapEntry** entries)
 	return g_PMM->MemoryMapCount;
 }
 
+void PMMDebugPrint()
+{
+	DebugCon_WriteString("PMM Memory Map:\n");
+	for (size_t i = 0; i < g_PMM->MemoryMapCount; ++i)
+	{
+		struct PMMMemoryMapEntry* entry   = &g_PMM->MemoryMap[i];
+		const char*               typeStr = nullptr;
+		switch (entry->Type)
+		{
+		case PMMMemoryMapTypeInvalid: typeStr = "Invalid"; break;
+		case PMMMemoryMapTypeUsable: typeStr = "Usable"; break;
+		case PMMMemoryMapTypeReclaimable: typeStr = "Reclaimable"; break;
+		case PMMMemoryMapTypeLoaderReclaimable: typeStr = "Loader Reclaimable"; break;
+		case PMMMemoryMapTypeTaken: typeStr = "Taken"; break;
+		case PMMMemoryMapTypeNullGuard: typeStr = "NullGuard"; break;
+		case PMMMemoryMapTypePMM: typeStr = "PMM"; break;
+		case PMMMemoryMapTypeKernel: typeStr = "Kernel"; break;
+		case PMMMemoryMapTypeModule: typeStr = "Module"; break;
+		case PMMMemoryMapTypeReserved: typeStr = "Reserved"; break;
+		case PMMMemoryMapTypeNVS: typeStr = "NVS"; break;
+		}
+		DebugCon_WriteFormatted("%20s: 0x%016lX -> 0x%016lx(%lu)\n", typeStr, entry->Start, entry->Start + entry->Size, entry->Size / 4096);
+	}
+
+	DebugCon_WriteString("PMM Free List:\n");
+	struct PMMFreeHeader* cur = g_PMM->LUT[0];
+	while (cur)
+	{
+		DebugCon_WriteFormatted("  0x%016lX -> 0x%016lX(%lu)\n", (uint64_t) cur, (uint64_t) cur + cur->Count * 4096, cur->Count);
+		cur = cur->Next;
+	}
+
+	DebugCon_WriteString("PMM LUT:\n");
+	cur        = g_PMM->LUT[0];
+	uint8_t pI = 0;
+	for (uint8_t i = 1; i < 255; ++i)
+	{
+		struct PMMFreeHeader* next = g_PMM->LUT[i];
+		if (next != cur)
+		{
+			if (cur)
+				DebugCon_WriteFormatted("  %u -> %u: 0x%016lX -> 0x%016lX(%lu)\n", pI, i - 1, (uint64_t) cur, (uint64_t) cur + cur->Count * 4096, cur->Count);
+			else
+				DebugCon_WriteFormatted("  %u -> %u: nullptr\n", pI, i - 1);
+			cur = next;
+			pI  = i;
+		}
+	}
+	if (cur)
+		DebugCon_WriteFormatted("  %u -> 254: 0x%016lX -> 0x%016lX(%lu)\n", pI, (uint64_t) cur, (uint64_t) cur + cur->Count * 4096, cur->Count);
+	else
+		DebugCon_WriteFormatted("  %u -> 254: nullptr\n", pI);
+}
+
 void* PMMAlloc(size_t count)
 {
 	if (count == 0)
@@ -380,18 +443,13 @@ void* PMMAlloc(size_t count)
 	g_PMM->Stats.PagesFree -= count;
 	uint64_t firstPage      = (uint64_t) header / 4096;
 	if (count > 1)
-	{
-		uint64_t lastPage = firstPage + count - 1;
-		PMMBitmapSetRange(firstPage, lastPage, false);
-	}
+		PMMBitmapSetRange(firstPage, firstPage + count - 1, false);
 	else
-	{
 		PMMBitmapSetEntry(firstPage, false);
-	}
 	if (header->Count > count)
 	{
-		PMMFillFreePages(firstPage + 1, firstPage + header->Count - 1);
-		PMMInsertFreeRange((struct PMMFreeHeader*) ((firstPage + 1) * 4096));
+		PMMFillFreePages(firstPage + count, firstPage + header->Count - 1);
+		PMMInsertFreeRange((struct PMMFreeHeader*) ((firstPage + count) * 4096));
 	}
 	return (void*) (firstPage * 4096);
 }

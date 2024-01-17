@@ -10,6 +10,8 @@
 	#include "x86_64/IDT.h"
 	#include "x86_64/InterruptHandlers.h"
 	#include "x86_64/KernelPageTable.h"
+
+extern void x86_64KPTSetCR3(uint64_t cr3, bool isLvl5);
 #endif
 
 static void VisitUltraInvalidAttribute(void* userdata);
@@ -67,14 +69,42 @@ void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 	}
 
 	void* singlePage = PMMAlloc(1);
-	DebugCon_WriteFormatted("Single Page: 0x%016X\r\n", singlePage);
+	DebugCon_WriteFormatted("Single Page: 0x%016lX\r\n", singlePage);
 	void* multiplePages = PMMAlloc(16);
-	DebugCon_WriteFormatted("Multiple Pages: 0x%016X\r\n", multiplePages);
+	DebugCon_WriteFormatted("Multiple Pages: 0x%016lX\r\n", multiplePages);
 	void* multipleAlignedPages = PMMAllocAligned(16, 23);
-	DebugCon_WriteFormatted("Multiple aligned Pages: 0x%016X\r\n", multipleAlignedPages);
+	DebugCon_WriteFormatted("Multiple aligned Pages: 0x%016lX\r\n", multipleAlignedPages);
 	PMMFree(singlePage, 1);
 	PMMFree(multiplePages, 16);
 	PMMFree(multipleAlignedPages, 16);
+
+	void* pageTable = VMMNewPageTable();
+	if (!pageTable)
+		CPUHalt();
+
+	DebugCon_WriteFormatted("VMM Allocated at 0x%016lX\n", (uint64_t) pageTable);
+
+	void* virtualSinglePage = VMMAlloc(pageTable, 1, 12, VMM_PAGE_TYPE_4KIB, VMM_PAGE_PROTECT_READ_WRITE_EXECUTE);
+	DebugCon_WriteFormatted("Single Page: 0x%016lX\r\n", virtualSinglePage);
+	void* virtualMultiplePages = VMMAlloc(pageTable, 16, 12, VMM_PAGE_TYPE_4KIB, VMM_PAGE_PROTECT_READ_WRITE_EXECUTE);
+	DebugCon_WriteFormatted("Multiple Pages: 0x%016lX\r\n", virtualMultiplePages);
+	void* virtualMultipleAlignedPages = VMMAlloc(pageTable, 16, 23, VMM_PAGE_TYPE_4KIB, VMM_PAGE_PROTECT_READ_WRITE_EXECUTE);
+	DebugCon_WriteFormatted("Multiple aligned Pages: 0x%016lX\r\n", virtualMultipleAlignedPages);
+	void* virtualPagesAt = VMMAllocAt(pageTable, 0x8000'0000'0000UL, 16, VMM_PAGE_TYPE_4KIB, VMM_PAGE_PROTECT_READ_WRITE_EXECUTE);
+	DebugCon_WriteFormatted("Pages At: 0x%016lX\r\n", virtualPagesAt);
+
+	{
+		struct VMMMemoryStats memoryStats;
+		VMMGetMemoryStats(pageTable, &memoryStats);
+		DebugCon_WriteFormatted("VMM Stats:\n  Footprint: %lu\n  Pages Allocated: %lu\n", (memoryStats.AllocatorFootprint + 4095) / 4096, memoryStats.PagesAllocated);
+	}
+
+	VMMFree(pageTable, virtualSinglePage, 1);
+	VMMFree(pageTable, virtualMultiplePages, 16);
+	VMMFree(pageTable, virtualMultipleAlignedPages, 16);
+	VMMFree(pageTable, virtualPagesAt, 16);
+
+	VMMFreePageTable(pageTable);
 
 	CPUHalt();
 }
