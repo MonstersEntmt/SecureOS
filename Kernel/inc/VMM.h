@@ -25,7 +25,7 @@ struct VMMMemoryStats
 	uint64_t PagesAllocated;
 };
 
-void* VMMNewPageTable();
+void* VMMNewPageTable(void);
 void  VMMFreePageTable(void* pageTable);
 void  VMMGetMemoryStats(void* pageTable, struct VMMMemoryStats* stats);
 

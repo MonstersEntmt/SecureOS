@@ -9,7 +9,7 @@ struct IDTEntry
 
 alignas(16) struct IDTEntry g_x86_64IDT[256];
 
-bool x86_64IDTClearDescriptors()
+bool x86_64IDTClearDescriptors(void)
 {
 	memset(g_x86_64IDT, 0, sizeof(g_x86_64IDT));
 	return true;

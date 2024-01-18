@@ -38,10 +38,10 @@ struct PMMMemoryStats
 typedef bool (*PMMGetMemoryMapEntryFn)(void* userdata, size_t index, struct PMMMemoryMapEntry* entry);
 
 void   PMMInit(size_t entryCount, PMMGetMemoryMapEntryFn getter, void* userdata);
-void   PMMReclaim();
+void   PMMReclaim(void);
 void   PMMGetMemoryStats(struct PMMMemoryStats* stats);
 size_t PMMGetMemoryMap(const struct PMMMemoryMapEntry** entries);
-void   PMMDebugPrint();
+void   PMMDebugPrint(void);
 
 void* PMMAlloc(size_t count);
 void* PMMAllocAligned(size_t count, uint8_t alignment);

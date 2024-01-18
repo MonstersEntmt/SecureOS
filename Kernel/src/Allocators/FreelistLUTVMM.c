@@ -589,7 +589,7 @@ static struct VMMFreeEntry* VMMGetAlignedRange(struct VMMState* state, uint64_t 
 	return cur;
 }
 
-void* VMMNewPageTable()
+void* VMMNewPageTable(void)
 {
 	struct VMMState* state = (struct VMMState*) PMMAlloc(3);
 	if (!state)

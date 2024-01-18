@@ -1,4 +1,4 @@
 #pragma once
 
-void  KernelVMMInit();
-void* GetKernelPageTable();
+void  KernelVMMInit(void);
+void* GetKernelPageTable(void);

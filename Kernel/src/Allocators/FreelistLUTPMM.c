@@ -331,7 +331,7 @@ void PMMInit(size_t entryCount, PMMGetMemoryMapEntryFn getter, void* userdata)
 	}
 }
 
-void PMMReclaim()
+void PMMReclaim(void)
 {
 	for (size_t i = 0; i < g_PMM->MemoryMapCount; ++i)
 	{
@@ -377,7 +377,7 @@ size_t PMMGetMemoryMap(const struct PMMMemoryMapEntry** entries)
 	return g_PMM->MemoryMapCount;
 }
 
-void PMMDebugPrint()
+void PMMDebugPrint(void)
 {
 	DebugCon_WriteString("PMM Memory Map:\n");
 	for (size_t i = 0; i < g_PMM->MemoryMapCount; ++i)

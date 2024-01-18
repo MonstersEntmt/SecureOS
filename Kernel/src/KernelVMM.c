@@ -4,7 +4,7 @@
 
 void* g_KVMM;
 
-void KernelVMMInit()
+void KernelVMMInit(void)
 {
 	g_KVMM = VMMNewPageTable();
 	if (!g_KVMM)
@@ -27,7 +27,7 @@ void KernelVMMInit()
 	VMMActivate(g_KVMM);
 }
 
-void* GetKernelPageTable()
+void* GetKernelPageTable(void)
 {
 	return g_KVMM;
 }
