@@ -1,3 +1,4 @@
+#include "ACPI/ACPI.h"
 #include "Build.h"
 #include "DebugCon.h"
 #include "Halt.h"
@@ -12,14 +13,19 @@
 	#include "x86_64/InterruptHandlers.h"
 #endif
 
-static void VisitUltraInvalidAttribute(void* userdata);
-static void VisitUltraPlatformInfoAttribute(struct ultra_platform_info_attribute* attribute, void* userdata);
-static void VisitUltraKernelInfoAttribute(struct ultra_kernel_info_attribute* attribute, void* userdata);
-static void VisitUltraMemoryMapAttribute(struct ultra_memory_map_attribute* attribute, void* userdata);
-static void VisitUltraModuleInfoAttribute(struct ultra_module_info_attribute* attribute, void* userdata);
-static void VisitUltraCommandLineAttribute(struct ultra_command_line_attribute* attribute, void* userdata);
-static void VisitUltraFramebufferAttribute(struct ultra_framebuffer_attribute* attribute, void* userdata);
-static void VisitUltraAttribute(struct ultra_attribute_header* attribute, void* userdata);
+struct KernelStartupData
+{
+	void* RsdpAddress;
+};
+
+static void VisitUltraInvalidAttribute(struct KernelStartupData* userdata);
+static void VisitUltraPlatformInfoAttribute(struct ultra_platform_info_attribute* attribute, struct KernelStartupData* userdata);
+static void VisitUltraKernelInfoAttribute(struct ultra_kernel_info_attribute* attribute, struct KernelStartupData* userdata);
+static void VisitUltraMemoryMapAttribute(struct ultra_memory_map_attribute* attribute, struct KernelStartupData* userdata);
+static void VisitUltraModuleInfoAttribute(struct ultra_module_info_attribute* attribute, struct KernelStartupData* userdata);
+static void VisitUltraCommandLineAttribute(struct ultra_command_line_attribute* attribute, struct KernelStartupData* userdata);
+static void VisitUltraFramebufferAttribute(struct ultra_framebuffer_attribute* attribute, struct KernelStartupData* userdata);
+static void VisitUltraAttribute(struct ultra_attribute_header* attribute, struct KernelStartupData* userdata);
 
 void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 {
@@ -46,16 +52,19 @@ void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 	EnableInterrupts();
 #endif
 
+	struct KernelStartupData kernelStartupData;
+
 	{
 		struct ultra_attribute_header* curAttribute = bootContext->attributes;
 		for (uint32_t i = 0; i < bootContext->attribute_count; ++i)
 		{
-			VisitUltraAttribute(curAttribute, nullptr);
+			VisitUltraAttribute(curAttribute, &kernelStartupData);
 			curAttribute = ULTRA_NEXT_ATTRIBUTE(curAttribute);
 		}
 	}
 
 	KernelVMMInit();
+	HandleACPITables(kernelStartupData.RsdpAddress);
 	PMMReclaim();
 
 	{
@@ -73,7 +82,7 @@ void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 	CPUHalt();
 }
 
-void VisitUltraAttribute(struct ultra_attribute_header* attribute, void* userdata)
+void VisitUltraAttribute(struct ultra_attribute_header* attribute, struct KernelStartupData* userdata)
 {
 	switch (attribute->type)
 	{
@@ -101,12 +110,12 @@ void VisitUltraAttribute(struct ultra_attribute_header* attribute, void* userdat
 	}
 }
 
-void VisitUltraInvalidAttribute(void* userdata)
+void VisitUltraInvalidAttribute(struct KernelStartupData* userdata)
 {
 	DebugCon_WriteString("ERROR: Invalid Ultra attribute encountered\r\n");
 }
 
-void VisitUltraPlatformInfoAttribute(struct ultra_platform_info_attribute* attribute, void* userdata)
+void VisitUltraPlatformInfoAttribute(struct ultra_platform_info_attribute* attribute, struct KernelStartupData* userdata)
 {
 	const char* platformType;
 	switch (attribute->platform_type)
@@ -122,9 +131,11 @@ void VisitUltraPlatformInfoAttribute(struct ultra_platform_info_attribute* attri
 							attribute->loader_major,
 							attribute->loader_minor,
 							platformType);
+
+	userdata->RsdpAddress = (void*) attribute->acpi_rsdp_address;
 }
 
-void VisitUltraKernelInfoAttribute(struct ultra_kernel_info_attribute* attribute, void* userdata)
+void VisitUltraKernelInfoAttribute(struct ultra_kernel_info_attribute* attribute, struct KernelStartupData* userdata)
 {
 	DebugCon_WriteFormatted("Kernel loaded at %016lx(%016lx) -> %016lx(%lu)\r\n",
 							attribute->virtual_base,
@@ -147,7 +158,7 @@ static bool PMMUltraMemoryMapGetter(void* userdata, size_t index, struct PMMMemo
 	case ULTRA_MEMORY_TYPE_INVALID: entry->Type = PMMMemoryMapTypeInvalid; break;
 	case ULTRA_MEMORY_TYPE_FREE: entry->Type = PMMMemoryMapTypeUsable; break;
 	case ULTRA_MEMORY_TYPE_RESERVED: entry->Type = PMMMemoryMapTypeReserved; break;
-	case ULTRA_MEMORY_TYPE_RECLAIMABLE: entry->Type = PMMMemoryMapTypeReclaimable; break;
+	case ULTRA_MEMORY_TYPE_RECLAIMABLE: entry->Type = PMMMemoryMapTypeACPI; break; // INFO(MarcasRealAccount): As UEFI and Hyper only gives a Reclaimable region for ACPI tables, we always assume as such
 	case ULTRA_MEMORY_TYPE_NVS: entry->Type = PMMMemoryMapTypeNVS; break;
 	case ULTRA_MEMORY_TYPE_LOADER_RECLAIMABLE: entry->Type = PMMMemoryMapTypeLoaderReclaimable; break;
 	case ULTRA_MEMORY_TYPE_MODULE: entry->Type = PMMMemoryMapTypeModule; break;
@@ -158,39 +169,13 @@ static bool PMMUltraMemoryMapGetter(void* userdata, size_t index, struct PMMMemo
 	return true;
 }
 
-void VisitUltraMemoryMapAttribute(struct ultra_memory_map_attribute* attribute, void* userdata)
+void VisitUltraMemoryMapAttribute(struct ultra_memory_map_attribute* attribute, struct KernelStartupData* userdata)
 {
 	size_t entryCount = ULTRA_MEMORY_MAP_ENTRY_COUNT(attribute->header);
-
-	// DebugCon_WriteString("Memory Map:\r\n");
-	// for (size_t i = 0; i < entryCount; ++i)
-	// {
-	// 	struct ultra_memory_map_entry* entry = attribute->entries + i;
-	// 	const char*                    memoryType;
-	// 	switch (entry->type)
-	// 	{
-	// 	case ULTRA_MEMORY_TYPE_INVALID: memoryType = "Invalid:"; break;
-	// 	case ULTRA_MEMORY_TYPE_FREE: memoryType = "Free:"; break;
-	// 	case ULTRA_MEMORY_TYPE_RESERVED: memoryType = "Reserved:"; break;
-	// 	case ULTRA_MEMORY_TYPE_RECLAIMABLE: memoryType = "Reclaimable:"; break;
-	// 	case ULTRA_MEMORY_TYPE_NVS: memoryType = "NVS:"; break;
-	// 	case ULTRA_MEMORY_TYPE_LOADER_RECLAIMABLE: memoryType = "Loader Reclaimable:"; break;
-	// 	case ULTRA_MEMORY_TYPE_MODULE: memoryType = "Module:"; break;
-	// 	case ULTRA_MEMORY_TYPE_KERNEL_STACK: memoryType = "Kernel Stack:"; break;
-	// 	case ULTRA_MEMORY_TYPE_KERNEL_BINARY: memoryType = "Kernel Binary:"; break;
-	// 	default: memoryType = "Unknown:"; break;
-	// 	}
-	// 	DebugCon_WriteFormatted("  %-19s %016lx -> %016lx(%lu)\r\n",
-	// 							memoryType,
-	// 							entry->physical_address,
-	// 							entry->physical_address + entry->size,
-	// 							entry->size);
-	// }
-
 	PMMInit(entryCount, PMMUltraMemoryMapGetter, attribute);
 }
 
-void VisitUltraModuleInfoAttribute(struct ultra_module_info_attribute* attribute, void* userdata)
+void VisitUltraModuleInfoAttribute(struct ultra_module_info_attribute* attribute, struct KernelStartupData* userdata)
 {
 	const char* moduleType;
 	switch (attribute->type)
@@ -208,12 +193,12 @@ void VisitUltraModuleInfoAttribute(struct ultra_module_info_attribute* attribute
 							attribute->size);
 }
 
-void VisitUltraCommandLineAttribute(struct ultra_command_line_attribute* attribute, void* userdata)
+void VisitUltraCommandLineAttribute(struct ultra_command_line_attribute* attribute, struct KernelStartupData* userdata)
 {
 	DebugCon_WriteFormatted("Command line: %s\r\n", attribute->text);
 }
 
-void VisitUltraFramebufferAttribute(struct ultra_framebuffer_attribute* attribute, void* userdata)
+void VisitUltraFramebufferAttribute(struct ultra_framebuffer_attribute* attribute, struct KernelStartupData* userdata)
 {
 	const char* formatType;
 	switch (attribute->fb.format)

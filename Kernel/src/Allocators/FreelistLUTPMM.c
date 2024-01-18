@@ -396,6 +396,7 @@ void PMMDebugPrint(void)
 		case PMMMemoryMapTypeKernel: typeStr = "Kernel"; break;
 		case PMMMemoryMapTypeModule: typeStr = "Module"; break;
 		case PMMMemoryMapTypeReserved: typeStr = "Reserved"; break;
+		case PMMMemoryMapTypeACPI: typeStr = "ACPI"; break;
 		case PMMMemoryMapTypeNVS: typeStr = "NVS"; break;
 		}
 		DebugCon_WriteFormatted("%20s: 0x%016lX -> 0x%016lx(%lu)\n", typeStr, entry->Start, entry->Start + entry->Size, entry->Size / 4096);

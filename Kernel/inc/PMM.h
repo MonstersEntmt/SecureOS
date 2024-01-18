@@ -15,7 +15,8 @@ enum PMMMemoryMapType
 	PMMMemoryMapTypeKernel            = 0x04,
 	PMMMemoryMapTypeModule            = 0x14,
 	PMMMemoryMapTypeReserved          = 0x08,
-	PMMMemoryMapTypeNVS               = 0x18
+	PMMMemoryMapTypeACPI              = 0x18,
+	PMMMemoryMapTypeNVS               = 0x28
 };
 
 struct PMMMemoryMapEntry

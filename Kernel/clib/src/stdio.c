@@ -225,6 +225,7 @@ static inline size_t ParseFormatOptions(const char* restrict fmt, size_t offset,
 	{
 		// Parse precision
 		options->precision = 0;
+		c                  = fmt[++offset];
 		while (1)
 		{
 			switch (c)
