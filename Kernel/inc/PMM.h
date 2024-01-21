@@ -13,7 +13,8 @@ enum PMMMemoryMapType
 	PMMMemoryMapTypeNullGuard         = 0x12,
 	PMMMemoryMapTypePMM               = 0x22,
 	PMMMemoryMapTypeKernel            = 0x04,
-	PMMMemoryMapTypeModule            = 0x14,
+	PMMMemoryMapTypeTrampoline        = 0x14,
+	PMMMemoryMapTypeModule            = 0x24,
 	PMMMemoryMapTypeReserved          = 0x08,
 	PMMMemoryMapTypeACPI              = 0x18,
 	PMMMemoryMapTypeNVS               = 0x28
@@ -33,6 +34,7 @@ struct PMMMemoryStats
 
 	uint64_t LastUsableAddress;
 	uint64_t LastAddress;
+	uint64_t PagesTaken;
 	uint64_t PagesFree;
 };
 
@@ -46,4 +48,5 @@ void   PMMDebugPrint(void);
 
 void* PMMAlloc(size_t count);
 void* PMMAllocAligned(size_t count, uint8_t alignment);
+void* PMMAllocBelow(size_t count, uint64_t largestAddress);
 void  PMMFree(void* address, size_t count);

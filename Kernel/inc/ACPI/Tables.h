@@ -178,7 +178,7 @@ struct ACPI_MADT_NMIS
 	uint32_t                   GSI; // Global System Interrupt
 } __attribute((packed));
 
-struct ACPI_MADT_LAPIC_NMIS
+struct ACPI_MADT_LAPIC_NMI
 {
 	struct ACPI_MADT_IC_HEADER Header;
 	uint8_t                    ACPIProcessorUID;
@@ -235,14 +235,79 @@ struct ACPI_MADT_Lx2APIC
 	uint32_t                   ACPIProcessorUID;
 } __attribute__((packed));
 
-struct ACPI_MADT_Lx2APIC_NMIS
+struct ACPI_MADT_Lx2APIC_NMI
 {
 	struct ACPI_MADT_IC_HEADER Header;
 	uint16_t                   Flags;
 	uint32_t                   ACPIProcessorUID;
 	uint8_t                    Lx2APIC_LINT;
 	uint8_t                    Reserved[3];
-} __attribute((packed));
+} __attribute__((packed));
+
+struct ACPI_MADT_GICC
+{
+	struct ACPI_MADT_IC_HEADER Header;
+} __attribute__((packed));
+
+struct ACPI_MADT_GICD
+{
+	struct ACPI_MADT_IC_HEADER Header;
+} __attribute__((packed));
+
+struct ACPI_MADT_GIC_MSI_FRAME
+{
+	struct ACPI_MADT_IC_HEADER Header;
+} __attribute__((packed));
+
+struct ACPI_MADT_GICR
+{
+	struct ACPI_MADT_IC_HEADER Header;
+} __attribute__((packed));
+
+struct ACPI_MADT_GIC_ITS
+{
+	struct ACPI_MADT_IC_HEADER Header;
+} __attribute__((packed));
+
+struct ACPI_MADT_MULTIPROCESSOR_WAKEUP
+{
+	struct ACPI_MADT_IC_HEADER Header;
+} __attribute__((packed));
+
+struct ACPI_MADT_CORE_PIC
+{
+	struct ACPI_MADT_IC_HEADER Header;
+} __attribute__((packed));
+
+struct ACPI_MADT_LIO_PIC
+{
+	struct ACPI_MADT_IC_HEADER Header;
+} __attribute__((packed));
+
+struct ACPI_MADT_HT_PIC
+{
+	struct ACPI_MADT_IC_HEADER Header;
+} __attribute__((packed));
+
+struct ACPI_MADT_EIO_PIC
+{
+	struct ACPI_MADT_IC_HEADER Header;
+} __attribute__((packed));
+
+struct ACPI_MADT_MSI_PIC
+{
+	struct ACPI_MADT_IC_HEADER Header;
+} __attribute__((packed));
+
+struct ACPI_MADT_BIO_PIC
+{
+	struct ACPI_MADT_IC_HEADER Header;
+} __attribute__((packed));
+
+struct ACPI_MADT_LPC_PIC
+{
+	struct ACPI_MADT_IC_HEADER Header;
+} __attribute__((packed));
 
 #define ACPI_FADT_WBINVD_MASK                               0x0000'0001U
 #define ACPI_FADT_WBINVD_FLUSH_MASK                         0x0000'0002U
@@ -269,34 +334,37 @@ struct ACPI_MADT_Lx2APIC_NMIS
 #define ACPI_FADT_PERSISTENT_CPU_CACHES_MASK                0x0040'0000U
 #define ACPI_FACS_S4BIOS_F_MASK                             0x0000'0001U
 #define ACPI_FACS_64BIT_WAKE_SUPPORTED_MASK                 0x0000'0002U
-#define ACPI_FACS_OSPM_64BIT_WAKE                           0x0000'0001U
+#define ACPI_FACS_OSPM_64BIT_WAKE_MASK                      0x0000'0001U
 #define ACPI_MADT_PCAT_COMPAT_MASK                          0x0000'0001U
-#define ACPI_MADT_IC_PROCESSOR_LAPIC                        0x00
-#define ACPI_MADT_IC_IOAPIC                                 0x01
-#define ACPI_MADT_IC_ISO                                    0x02
-#define ACPI_MADT_IC_NMIS                                   0x03
-#define ACPI_MADT_IC_LAPIC_NMI                              0x04
-#define ACPI_MADT_IC_LAPIC_ADDRESS_OVERRIDE                 0x05
-#define ACPI_MADT_IC_IO_SAPIC                               0x06
-#define ACPI_MADT_IC_LSAPIC                                 0x07
-#define ACPI_MADT_IC_PIS                                    0x08
-#define ACPI_MADT_IC_PROCESSOR_Lx2APIC                      0x09
-#define ACPI_MADT_IC_Lx2APIC_NMI                            0x0A
-#define ACPI_MADT_IC_GICC                                   0x0B
-#define ACPI_MADT_IC_GICD                                   0x0C
-#define ACPI_MADT_IC_GIC_MSI_FRAME                          0x0D
-#define ACPI_MADT_IC_GICR                                   0x0E
-#define ACPI_MADT_IC_GIC_ITS                                0x0F
-#define ACPI_MADT_IC_MULTIPROCESSOR_WAKEUP                  0x10
-#define ACPI_MADT_IC_CORE_PIC                               0x11
-#define ACPI_MADT_IC_LIO_PIC                                0x12
-#define ACPI_MADT_IC_HT_PIC                                 0x13
-#define ACPI_MADT_IC_EIO_PIC                                0x14
-#define ACPI_MADT_IC_MSI_PIC                                0x15
-#define ACPI_MADT_IC_BIO_PIC                                0x16
-#define ACPI_MADT_IC_LPC_PIC                                0x17
 #define ACPI_MADT_LAPIC_ENABLED_MASK                        0x0000'0001U
 #define ACPI_MADT_LAPIC_ONLINE_CAPABLE_MASK                 0x0000'0002U
+#define ACPI_MADT_ISO_POLARITY_BIT                          0
+#define ACPI_MADT_ISO_TRIGGER_MODE_BIT                      2
 #define ACPI_MADT_ISO_POLARITY_MASK                         0x0000'0003U
 #define ACPI_MADT_ISO_TRIGGER_MODE_MASK                     0x0000'000CU
 #define ACPI_MADT_PIS_CPEI_PROCESSOR_OVERRIDE_MASK          0x0000'0001U
+
+#define ACPI_MADT_IC_PROCESSOR_LAPIC        0x00
+#define ACPI_MADT_IC_IOAPIC                 0x01
+#define ACPI_MADT_IC_ISO                    0x02
+#define ACPI_MADT_IC_NMIS                   0x03
+#define ACPI_MADT_IC_LAPIC_NMI              0x04
+#define ACPI_MADT_IC_LAPIC_ADDRESS_OVERRIDE 0x05
+#define ACPI_MADT_IC_IO_SAPIC               0x06
+#define ACPI_MADT_IC_LSAPIC                 0x07
+#define ACPI_MADT_IC_PIS                    0x08
+#define ACPI_MADT_IC_PROCESSOR_Lx2APIC      0x09
+#define ACPI_MADT_IC_Lx2APIC_NMI            0x0A
+#define ACPI_MADT_IC_GICC                   0x0B
+#define ACPI_MADT_IC_GICD                   0x0C
+#define ACPI_MADT_IC_GIC_MSI_FRAME          0x0D
+#define ACPI_MADT_IC_GICR                   0x0E
+#define ACPI_MADT_IC_GIC_ITS                0x0F
+#define ACPI_MADT_IC_MULTIPROCESSOR_WAKEUP  0x10
+#define ACPI_MADT_IC_CORE_PIC               0x11
+#define ACPI_MADT_IC_LIO_PIC                0x12
+#define ACPI_MADT_IC_HT_PIC                 0x13
+#define ACPI_MADT_IC_EIO_PIC                0x14
+#define ACPI_MADT_IC_MSI_PIC                0x15
+#define ACPI_MADT_IC_BIO_PIC                0x16
+#define ACPI_MADT_IC_LPC_PIC                0x17

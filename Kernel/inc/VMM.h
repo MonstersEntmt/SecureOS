@@ -37,4 +37,5 @@ void VMMProtect(void* pageTable, void* virtualAddress, size_t count, enum VMMPag
 void VMMMap(void* pageTable, void* virtualAddress, void* physicalAddress);
 void VMMMapLinear(void* pageTable, void* virtualAddress, void* physicalAddress, size_t count);
 
-void VMMActivate(void* pageTable);
+void  VMMActivate(void* pageTable);
+void* VMMGetRootTable(void* pageTable, uint8_t* levels, bool* use1GiB);

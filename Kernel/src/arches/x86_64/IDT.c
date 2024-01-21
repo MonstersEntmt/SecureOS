@@ -44,3 +44,8 @@ bool x86_64IDTSetTrapGate(uint16_t vector, uint64_t target, uint16_t selector, u
 	entry->upper           = target >> 32;
 	return true;
 }
+
+void* x86_64GetIDT(void)
+{
+	return g_x86_64IDT;
+}

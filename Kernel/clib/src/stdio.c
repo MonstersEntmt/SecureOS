@@ -307,6 +307,7 @@ static inline size_t ParseFormatOptions(const char* restrict fmt, size_t offset,
 	switch (c)
 	{
 	case '%':
+	case 'b':
 	case 'c':
 	case 's':
 	case 'd':
@@ -408,6 +409,25 @@ size_t vfprintf(FILE* restrict stream, const char* restrict fmt, va_list vlist)
 			if (!RightSpacePad(stream, &options, 1, &len))
 				goto BREAKOUT;
 			break;
+		case 'b':
+		{
+			int b = -1;
+			switch (options.lengthMode)
+			{
+			case 0:
+			case 1:
+			case 2: b = va_arg(vlist, int); break;
+			}
+			b = !!b;
+			if (!LeftSpacePad(stream, &options, b ? 4 : 5, &len))
+				goto BREAKOUT;
+			if (!stream->WriteChars(stream, b ? "true" : "false", b ? 4 : 5))
+				goto BREAKOUT;
+			len += b ? 4 : 5;
+			if (!RightSpacePad(stream, &options, b ? 4 : 5, &len))
+				goto BREAKOUT;
+			break;
+		}
 		case 'c':
 		{
 			int c = -1;

@@ -33,3 +33,8 @@ bool x86_64GDTSetDataDescriptor(uint16_t descriptor)
 	g_x86_64GDT[descriptor] = 0x00AF'9300'0000'FFFFUL;
 	return true;
 }
+
+void* x86_64GetGDT(void)
+{
+	return g_x86_64GDT;
+}

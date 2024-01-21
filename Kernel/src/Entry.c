@@ -6,11 +6,13 @@
 #include "PMM.h"
 #include "Ultra/UltraProtocol.h"
 #include "VMM.h"
+#include <string.h>
 
 #if BUILD_IS_ARCH_X86_64
 	#include "x86_64/GDT.h"
 	#include "x86_64/IDT.h"
 	#include "x86_64/InterruptHandlers.h"
+	#include "x86_64/Trampoline.h"
 #endif
 
 struct KernelStartupData
@@ -26,6 +28,11 @@ static void VisitUltraModuleInfoAttribute(struct ultra_module_info_attribute* at
 static void VisitUltraCommandLineAttribute(struct ultra_command_line_attribute* attribute, struct KernelStartupData* userdata);
 static void VisitUltraFramebufferAttribute(struct ultra_framebuffer_attribute* attribute, struct KernelStartupData* userdata);
 static void VisitUltraAttribute(struct ultra_attribute_header* attribute, struct KernelStartupData* userdata);
+
+bool    g_LapicWaitLock = false;
+uint8_t g_LapicsRunning = 0;
+void    CPUTrampoline(uint8_t lapicID);
+void*   CPUStackAlloc(void);
 
 void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 {
@@ -70,7 +77,7 @@ void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 	{
 		struct PMMMemoryStats memoryStats;
 		PMMGetMemoryStats(&memoryStats);
-		DebugCon_WriteFormatted("PMM Stats:\n  Footprint: %lu\n  Last Usable Address: 0x%016lu\n  Last Address: 0x%016lu\n  Pages Free: %lu\n", (memoryStats.AllocatorFootprint + 4095) / 4096, memoryStats.LastUsableAddress, memoryStats.LastAddress, memoryStats.PagesFree);
+		DebugCon_WriteFormatted("PMM Stats:\n  Footprint: %lu\n  Last Usable Address: 0x%016lu\n  Last Address: 0x%016lu\n  Pages Taken: %lu\n  Pages Free: %lu\n", (memoryStats.AllocatorFootprint + 4095) / 4096, memoryStats.LastUsableAddress, memoryStats.LastAddress, memoryStats.PagesTaken, memoryStats.PagesFree);
 	}
 
 	{
@@ -79,7 +86,103 @@ void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 		DebugCon_WriteFormatted("Kernel VMM Stats:\n  Footprint: %lu\n  Pages Allocated: %lu\n", (memoryStats.AllocatorFootprint + 4095) / 4096, memoryStats.PagesAllocated);
 	}
 
+	{
+		void*   kernelPageTable        = GetKernelPageTable();
+		uint8_t kernelPageTableLevels  = 0;
+		bool    kernelPageTableUse1GiB = false;
+		void*   kernelRootPage         = VMMGetRootTable(kernelPageTable, &kernelPageTableLevels, &kernelPageTableUse1GiB);
+		void*   tempRootPageTable      = PMMAllocBelow(1, 0xFFFF'FFFFU);
+		memcpy(tempRootPageTable, kernelRootPage, 4096);
+
+#if BUILD_IS_ARCH_X86_64
+		g_x86_64TrampolineSettings = (struct x86_64TrampolineSettings) {
+			.PageTable         = (uint64_t) tempRootPageTable,
+			.PageTableSettings = (kernelPageTableLevels == 5 ? 1 : 0) | (kernelPageTableUse1GiB ? 2 : 0),
+			.CPUTrampolineFn   = (uint64_t) CPUTrampoline,
+			.StackAllocFn      = (uint64_t) CPUStackAlloc
+		};
+		memcpy((void*) 0x1000, x86_64Trampoline, 4096);
+
+		struct x86_64TrampolineStats* trampolineStats = (struct x86_64TrampolineStats*) (0x1000 + ((uint64_t) &g_x86_64TrampolineStats - (uint64_t) x86_64Trampoline));
+#endif
+
+		void*     lapicAddress   = GetLAPICAddress();
+		uint32_t* lapicRegisters = (uint32_t*) lapicAddress;
+		uint8_t   lapicCount     = 0;
+		uint8_t*  lapicIDs       = GetLAPICIDs(&lapicCount);
+
+		g_LapicWaitLock = true;
+		for (size_t i = 1; i < lapicCount; ++i) // Hoping implementations uphold the ACPI specification with first lapicID being the boot core
+		{
+			uint8_t id = lapicIDs[i];
+
+			uint8_t pLapicsRunning = g_LapicsRunning;
+
+			*trampolineStats = (struct x86_64TrampolineStats) {
+				.Alive = 0,
+				.Ack   = 0
+			};
+
+			lapicRegisters[0xA0] = 0;
+			lapicRegisters[0xC4] = lapicRegisters[0xC4] & 0x00FF'FFFF | (id << 24);
+			lapicRegisters[0xC0] = lapicRegisters[0xC0] & 0xFFF0'0000 | 0xC500;
+			while (lapicRegisters[0xC0] & 4096);
+			lapicRegisters[0xC4] = lapicRegisters[0xC4] & 0x00FF'FFFF | (id << 24);
+			lapicRegisters[0xC0] = lapicRegisters[0xC0] & 0xFFF0'0000 | 0x8500;
+			while (lapicRegisters[0xC0] & 4096);
+
+			for (uint8_t j = 0; j < 2; ++j)
+			{
+				lapicRegisters[0xA0] = 0;
+				lapicRegisters[0xC4] = lapicRegisters[0xC4] & 0x00FF'FFFF | (id << 24);
+				uint32_t val         = lapicRegisters[0xC0] & 0xFFF0'F800 | 0x0601;
+				lapicRegisters[0xC0] = val;
+				while (lapicRegisters[0xC0] & 4096);
+			}
+
+			while (!trampolineStats->Alive); // Wait for cpu to be alive
+			trampolineStats->Ack = true;
+
+			while (g_LapicsRunning == pLapicsRunning); // Synchronize with lapic bootstrap
+		}
+		g_LapicWaitLock = false;
+
+		PMMFree(tempRootPageTable, 1);
+	}
+
 	CPUHalt();
+}
+
+void CPUTrampoline(uint8_t lapicID)
+{
+	x86_64LoadGDT(8, 16);
+	x86_64LoadLDT(0);
+	x86_64LoadIDT();
+	EnableInterrupts();
+
+	void* pageTable = GetKernelPageTable();
+	VMMActivate(pageTable);
+
+	++g_LapicsRunning;
+	while (g_LapicWaitLock);
+
+	DebugCon_WriteString("This string will look fucked\n");
+
+	CPUHalt();
+}
+
+void* CPUStackAlloc(void)
+{
+	void* kernelPageTable = GetKernelPageTable();
+	void* stack           = VMMAlloc(kernelPageTable, 4, 0, VMM_PAGE_TYPE_4KIB, VMM_PAGE_PROTECT_READ_WRITE);
+	for (size_t i = 0; i < 4; ++i)
+	{
+		void* physical = PMMAlloc(1);
+		if (!physical)
+			return nullptr; // TODO(MarcasRealAccount): PANIC
+		VMMMap(kernelPageTable, (uint8_t*) stack + i * 4096, physical);
+	}
+	return stack + 4 * 4096;
 }
 
 void VisitUltraAttribute(struct ultra_attribute_header* attribute, struct KernelStartupData* userdata)
@@ -158,7 +261,7 @@ static bool PMMUltraMemoryMapGetter(void* userdata, size_t index, struct PMMMemo
 	case ULTRA_MEMORY_TYPE_INVALID: entry->Type = PMMMemoryMapTypeInvalid; break;
 	case ULTRA_MEMORY_TYPE_FREE: entry->Type = PMMMemoryMapTypeUsable; break;
 	case ULTRA_MEMORY_TYPE_RESERVED: entry->Type = PMMMemoryMapTypeReserved; break;
-	case ULTRA_MEMORY_TYPE_RECLAIMABLE: entry->Type = PMMMemoryMapTypeACPI; break; // INFO(MarcasRealAccount): As UEFI and Hyper only gives a Reclaimable region for ACPI tables, we always assume as such
+	case ULTRA_MEMORY_TYPE_RECLAIMABLE: entry->Type = PMMMemoryMapTypeReclaimable; break;
 	case ULTRA_MEMORY_TYPE_NVS: entry->Type = PMMMemoryMapTypeNVS; break;
 	case ULTRA_MEMORY_TYPE_LOADER_RECLAIMABLE: entry->Type = PMMMemoryMapTypeLoaderReclaimable; break;
 	case ULTRA_MEMORY_TYPE_MODULE: entry->Type = PMMMemoryMapTypeModule; break;

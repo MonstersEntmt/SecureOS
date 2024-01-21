@@ -107,7 +107,7 @@ static void VMMPageTableMap(struct VMMState* state, uint64_t page, uint64_t phys
 			enum VMMPageType    type;
 			enum VMMPageProtect protect;
 			VMMArchGetPageTableEntry(pageTable[entry], i, nullptr, &type, &protect);
-			pageTable[i] = VMMArchConstructPageTableEntry(physicalAddress, type, protect);
+			pageTable[entry] = VMMArchConstructPageTableEntry(physicalAddress, type, protect);
 			return;
 		}
 	}
@@ -787,6 +787,19 @@ void VMMActivate(void* pageTable)
 
 	struct VMMState* state = (struct VMMState*) pageTable;
 	VMMArchActivate(state->PageTableRoot, state->Levels, state->Supports1GiB);
+}
+
+void* VMMGetRootTable(void* pageTable, uint8_t* levels, bool* use1GiB)
+{
+	if (!pageTable)
+		return nullptr;
+
+	struct VMMState* state = (struct VMMState*) pageTable;
+	if (levels)
+		*levels = state->Levels;
+	if (use1GiB)
+		*use1GiB = state->Supports1GiB;
+	return state->PageTableRoot;
 }
 
 #endif

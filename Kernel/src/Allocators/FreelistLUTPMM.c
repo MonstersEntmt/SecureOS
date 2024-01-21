@@ -244,8 +244,8 @@ void PMMInit(size_t entryCount, PMMGetMemoryMapEntryFn getter, void* userdata)
 			continue;
 		if (tempMemoryMapEntry.Start == 0)
 		{
-			tempMemoryMapEntry.Start += 4096;
-			tempMemoryMapEntry.Size  -= 4096;
+			tempMemoryMapEntry.Start += 8192;
+			tempMemoryMapEntry.Size  -= 8192;
 		}
 		if (tempMemoryMapEntry.Size <= pmmRequiredSize)
 			continue;
@@ -260,6 +260,7 @@ void PMMInit(size_t entryCount, PMMGetMemoryMapEntryFn getter, void* userdata)
 		.AllocatorFootprint = pmmRequiredSize,
 		.LastUsableAddress  = lastUsableAddress,
 		.LastAddress        = lastAddress,
+		.PagesTaken         = 0,
 		.PagesFree          = 0
 	};
 	g_PMM->MemoryMapCount = 0;
@@ -277,8 +278,8 @@ void PMMInit(size_t entryCount, PMMGetMemoryMapEntryFn getter, void* userdata)
 
 		if (tempMemoryMapEntry.Start == 0)
 		{
-			tempMemoryMapEntry.Start += 4096;
-			tempMemoryMapEntry.Size  -= 4096;
+			tempMemoryMapEntry.Start += 8192;
+			tempMemoryMapEntry.Size  -= 8192;
 		}
 		if (pmmAllocatedIn == i)
 		{
@@ -287,9 +288,10 @@ void PMMInit(size_t entryCount, PMMGetMemoryMapEntryFn getter, void* userdata)
 		}
 
 		PMMFree((void*) tempMemoryMapEntry.Start, tempMemoryMapEntry.Size / 4096);
+		g_PMM->Stats.PagesTaken += tempMemoryMapEntry.Size / 4096;
 	}
 
-	g_PMM->MemoryMapCount                 = entryCount + 2;
+	g_PMM->MemoryMapCount                 = entryCount + 3;
 	g_PMM->MemoryMap                      = PMMAlloc((g_PMM->MemoryMapCount + 4095) / 4096);
 	g_PMM->Stats.AllocatorFootprint      += (g_PMM->MemoryMapCount + 4095) & ~0xFFFUL;
 	size_t curMemoryMapEntry              = 0;
@@ -298,6 +300,11 @@ void PMMInit(size_t entryCount, PMMGetMemoryMapEntryFn getter, void* userdata)
 		.Size  = 4096,
 		.Type  = PMMMemoryMapTypeNullGuard
 	};
+	g_PMM->MemoryMap[curMemoryMapEntry++] = (struct PMMMemoryMapEntry) {
+		.Start = 4096,
+		.Size  = 4096,
+		.Type  = PMMMemoryMapTypeTrampoline
+	};
 	for (size_t i = 0; i < entryCount; ++i)
 	{
 		if (!getter(userdata, i, &tempMemoryMapEntry))
@@ -305,8 +312,8 @@ void PMMInit(size_t entryCount, PMMGetMemoryMapEntryFn getter, void* userdata)
 
 		if (tempMemoryMapEntry.Start == 0)
 		{
-			tempMemoryMapEntry.Start += 4096;
-			tempMemoryMapEntry.Size  -= 4096;
+			tempMemoryMapEntry.Start += 8192;
+			tempMemoryMapEntry.Size  -= 8192;
 		}
 		if (pmmAllocatedIn == i)
 		{
@@ -340,7 +347,8 @@ void PMMReclaim(void)
 			continue;
 
 		PMMFree((void*) entry->Start, entry->Size / 4096);
-		entry->Type = PMMMemoryMapTypeTaken;
+		g_PMM->Stats.PagesTaken += entry->Size / 4096;
+		entry->Type              = PMMMemoryMapTypeTaken;
 	}
 
 	size_t                    moveCount = 0;
@@ -394,6 +402,7 @@ void PMMDebugPrint(void)
 		case PMMMemoryMapTypeNullGuard: typeStr = "NullGuard"; break;
 		case PMMMemoryMapTypePMM: typeStr = "PMM"; break;
 		case PMMMemoryMapTypeKernel: typeStr = "Kernel"; break;
+		case PMMMemoryMapTypeTrampoline: typeStr = "Trampoline"; break;
 		case PMMMemoryMapTypeModule: typeStr = "Module"; break;
 		case PMMMemoryMapTypeReserved: typeStr = "Reserved"; break;
 		case PMMMemoryMapTypeACPI: typeStr = "ACPI"; break;
@@ -491,6 +500,36 @@ void* PMMAllocAligned(size_t count, uint8_t alignment)
 	{
 		PMMFillFreePages(lastPage + 1, lastRangePage);
 		PMMInsertFreeRange((struct PMMFreeHeader*) ((lastPage + 1) * 4096));
+	}
+	return (void*) (firstPage * 4096);
+}
+
+void* PMMAllocBelow(size_t count, uint64_t largestAddress)
+{
+	if (count == 0)
+		return nullptr;
+	if (largestAddress / 4096 < count)
+		return nullptr;
+
+	uint64_t highestAddress = largestAddress - count * 4096;
+
+	struct PMMFreeHeader* cur = g_PMM->LUT[0];
+	while (cur && (cur->Count < count || (uint64_t) cur > highestAddress))
+		cur = cur->Next;
+	if (!cur)
+		return nullptr;
+
+	PMMEraseFreeRange(cur);
+	g_PMM->Stats.PagesFree -= count;
+	uint64_t firstPage      = (uint64_t) cur / 4096;
+	if (count > 1)
+		PMMBitmapSetRange(firstPage, firstPage + count - 1, false);
+	else
+		PMMBitmapSetEntry(firstPage, false);
+	if (cur->Count > count)
+	{
+		PMMFillFreePages(firstPage + count, firstPage + cur->Count - 1);
+		PMMInsertFreeRange((struct PMMFreeHeader*) ((firstPage + count) * 4096));
 	}
 	return (void*) (firstPage * 4096);
 }
