@@ -37,8 +37,10 @@ Bin/$(CONFIG)/UEFI/hyper.cfg: Boot/hyper.cfg
 	mkdir -p $(dir $@)
 	cp -T $< $@
 
-Bin/$(CONFIG)/Boot/Drive.img: Kernel ImgGen $(BOOT_FILES)
+Bin/$(CONFIG)/Boot/Drive.img: Kernel ImgGen FontBitmap $(BOOT_FILES)
 	mkdir -p $(dir $@)
+	mkdir -p $(dir Bin/$(CONFIG)/UEFI/SecureOS/)
+	Bin/$(CONFIG)/FontBitmap FontBitmap/ASCII.font 'Bin/$(CONFIG)/UEFI/secure-os/ascii.fnt'
 	Bin/$(CONFIG)/Boot/ImgGen \
 		-o $@ \
 		-s 2GiB \
