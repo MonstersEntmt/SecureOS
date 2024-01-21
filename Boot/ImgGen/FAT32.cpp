@@ -19,7 +19,7 @@ namespace FAT32
 	static void WriteFAT(FSState& state, std::fstream& imageStream, uint32_t sector, const uint32_t* fat, size_t count);
 	static void WriteCluster(FSState& state, std::fstream& imageStream, uint32_t cluster, const void* data, uint32_t dataLength);
 	static void WriteClusters(FSState& state, std::fstream& imageStream, uint32_t firstCluster, const void* data, uint32_t dataLength, bool alloc = false);
-	static bool CompareFilenames(std::u16string_view filename1, std::string_view filename2, bool caseSensitive = true);
+	static bool CompareFilenames(std::u16string_view filename1, std::string_view filename2);
 
 	void InitState(FSState& state, std::string_view volumeLabel)
 	{
@@ -167,40 +167,34 @@ namespace FAT32
 		for (size_t i = 0; i < itr->Entries.size();)
 		{
 			auto& entry = itr->Entries[i];
-			if (!(entry.Attributes & 0x30))
+			if ((entry.Attributes & 0x0F) == 0x0F)
 			{
-				++i;
-				continue;
-			}
-
-			if ((entry.Attributes & 0xF) == 0xF)
-			{
+				memset(filenameBuf, 0, 261 * 2);
 				FAT32LongFilenameDirectoryEntry* longEntry = (FAT32LongFilenameDirectoryEntry*) &entry;
 
-				memcpy(filenameBuf + 260 - 13, longEntry->Name1, 10);
-				memcpy(filenameBuf + 260 - 8, longEntry->Name2, 12);
-				memcpy(filenameBuf + 260 - 2, longEntry->Name3, 4);
-				uint8_t index = 1;
-				do
+				size_t index = ((longEntry->Ordinal & 0x3F) - 1) * 13;
+				memcpy(filenameBuf + index, longEntry->Name1, 10);
+				memcpy(filenameBuf + index + 5, longEntry->Name2, 12);
+				memcpy(filenameBuf + index + 11, longEntry->Name3, 4);
+				filenameBuf[index + 13] = u'\0';
+				while (!(longEntry->Ordinal & 0x40))
 				{
 					++longEntry;
 					++i;
-					memcpy(filenameBuf + 260 - 13 * index, longEntry->Name1, 10);
-					memcpy(filenameBuf + 260 - 13 * index + 5, longEntry->Name2, 12);
-					memcpy(filenameBuf + 260 - 13 * index + 11, longEntry->Name3, 4);
+					index = (longEntry->Ordinal & 0x3F) * 13;
+					memcpy(filenameBuf + index, longEntry->Name1, 10);
+					memcpy(filenameBuf + index + 5, longEntry->Name2, 12);
+					memcpy(filenameBuf + index + 11, longEntry->Name3, 4);
 				}
-				while (!(longEntry->Ordinal & 0x40));
-				memmove(filenameBuf, filenameBuf + 260 - 13 * index, (13 * index) * 2);
-				filenameBuf[13 * index] = u'\0';
 				++i;
 
-				if (!CompareFilenames(filenameBuf, name, true))
+				if (!CompareFilenames(filenameBuf, name))
 				{
 					++i;
 					continue;
 				}
 			}
-			else
+			else if (entry.Attributes & 0x30)
 			{
 				size_t j = 0;
 				for (j = 0; j < 8; ++j)
@@ -217,13 +211,17 @@ namespace FAT32
 				}
 				filenameBuf[j] = u'\0';
 
-				if (!CompareFilenames(filenameBuf, name, false))
+				if (!CompareFilenames(filenameBuf, name))
 				{
 					++i;
 					continue;
 				}
 			}
-
+			else
+			{
+				++i;
+				continue;
+			}
 			return { &state, (uint32_t) (itr->Entries[i].FirstClusterLow | (itr->Entries[i].FirstClusterHigh << 16)), parent, (uint32_t) i };
 		}
 		return { &state, ~0U, 0, 0 };
@@ -261,6 +259,8 @@ namespace FAT32
 			for (size_t i = 0; i < 11; ++i)
 				checksum = (checksum & 1 ? 0x80 : 0) + (checksum >> 1) + shortName[i];
 			AppendLongFilanameEntries(itr->Entries, nameutf16, checksum);
+			if (state.Verbose)
+				std::cout << "Directory '" << name << "' has long name prepended\n";
 		}
 
 		uint32_t firstCluster = AllocCluster(state);
@@ -352,7 +352,7 @@ namespace FAT32
 				filenameBuf[13 * index] = u'\0';
 				++i;
 
-				if (!CompareFilenames(filenameBuf, name, true))
+				if (!CompareFilenames(filenameBuf, name))
 				{
 					++i;
 					continue;
@@ -375,7 +375,7 @@ namespace FAT32
 				}
 				filenameBuf[j] = u'\0';
 
-				if (!CompareFilenames(filenameBuf, name, false))
+				if (!CompareFilenames(filenameBuf, name))
 				{
 					++i;
 					continue;
@@ -769,7 +769,7 @@ namespace FAT32
 		}
 	}
 
-	bool CompareFilenames(std::u16string_view filename1, std::string_view filename2, bool caseSensitive)
+	bool CompareFilenames(std::u16string_view filename1, std::string_view filename2)
 	{
 		auto filename2utf16 = UTF8ToUTF16(filename2);
 		if (filename1.size() != filename2utf16.size())
@@ -777,8 +777,8 @@ namespace FAT32
 
 		for (size_t i = 0; i < filename1.size(); ++i)
 		{
-			char16_t a = caseSensitive ? filename1[i] : (char16_t) std::towupper(filename1[i]);
-			char16_t b = caseSensitive ? filename2utf16[i] : (char16_t) std::towupper(filename2utf16[i]);
+			char16_t a = (char16_t) std::towupper(filename1[i]);
+			char16_t b = (char16_t) std::towupper(filename2utf16[i]);
 			if (a != b)
 				return false;
 		}
