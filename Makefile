@@ -29,6 +29,7 @@ clean:
 include Targets/$(TARGET).mk
 
 include Boot/make.mk
+include FontBitmap/make.mk
 include Kernel/make.mk
 
 BOOT_FILES += Bin/$(CONFIG)/UEFI/hyper.cfg
@@ -58,3 +59,5 @@ QEMU_ARGS += -s -S
 endif
 run: Drive.img
 	$(QEMU) $(QEMU_ARGS)
+
+configure: Kernel ImgGen FontBitmap
