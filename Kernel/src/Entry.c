@@ -1,11 +1,13 @@
 #include "ACPI/ACPI.h"
 #include "Build.h"
 #include "DebugCon.h"
+#include "Graphics/Graphics.h"
 #include "Halt.h"
 #include "KernelVMM.h"
 #include "PMM.h"
 #include "Ultra/UltraProtocol.h"
 #include "VMM.h"
+
 #include <string.h>
 
 #if BUILD_IS_ARCH_X86_64
@@ -18,6 +20,10 @@
 struct KernelStartupData
 {
 	void* RsdpAddress;
+
+	struct Framebuffer Framebuffer;
+
+	void* BasicLatin;
 };
 
 static void VisitUltraInvalidAttribute(struct KernelStartupData* userdata);
@@ -73,6 +79,8 @@ void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 	KernelVMMInit();
 	HandleACPITables(kernelStartupData.RsdpAddress);
 	PMMReclaim();
+
+	LoadFont((struct FontHeader*) kernelStartupData.BasicLatin);
 
 	{
 		struct PMMMemoryStats memoryStats;
@@ -149,6 +157,9 @@ void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 
 		PMMFree(tempRootPageTable, 1);
 	}
+
+	GraphicsDrawRect(&kernelStartupData.Framebuffer, (struct GraphicsRect) { .x = 0, .y = 0, .w = kernelStartupData.Framebuffer.Width, .h = kernelStartupData.Framebuffer.Height }, (struct LinearColor) { .r = 0, .g = 0, .b = 0, .a = 65535 }, (struct LinearColor) { .r = 0, .g = 0, .b = 0, .a = 65535 });
+	GraphicsDrawText(&kernelStartupData.Framebuffer, (struct GraphicsPoint) { .x = 5, .y = 5 }, "This is some test text\nWith multiple lines and with invalid characters \0\1\2\3\4 What'ya think?\nAnd also text\rover text,\ttabs too, but badly... Oh and also '\xFF' this :>", 163, (struct LinearColor) { .r = 65535, .g = 65535, .b = 65535, .a = 65535 });
 
 	CPUHalt();
 }
@@ -294,6 +305,9 @@ void VisitUltraModuleInfoAttribute(struct ultra_module_info_attribute* attribute
 							attribute->address,
 							attribute->address + attribute->size,
 							attribute->size);
+
+	if (strcmp(attribute->name, "bsclatin.fnt") == 0)
+		userdata->BasicLatin = (void*) attribute->address;
 }
 
 void VisitUltraCommandLineAttribute(struct ultra_command_line_attribute* attribute, struct KernelStartupData* userdata)
@@ -303,14 +317,32 @@ void VisitUltraCommandLineAttribute(struct ultra_command_line_attribute* attribu
 
 void VisitUltraFramebufferAttribute(struct ultra_framebuffer_attribute* attribute, struct KernelStartupData* userdata)
 {
+	userdata->Framebuffer.Width      = attribute->fb.width;
+	userdata->Framebuffer.Height     = attribute->fb.height;
+	userdata->Framebuffer.Pitch      = attribute->fb.pitch;
+	userdata->Framebuffer.Content    = (void*) attribute->fb.physical_address;
+	userdata->Framebuffer.Colorspace = FramebufferColorspaceSRGB;
+
 	const char* formatType;
 	switch (attribute->fb.format)
 	{
 	case ULTRA_FB_FORMAT_INVALID: formatType = "Invalid"; break;
-	case ULTRA_FB_FORMAT_RGB888: formatType = "RGB"; break;
-	case ULTRA_FB_FORMAT_BGR888: formatType = "BGR"; break;
-	case ULTRA_FB_FORMAT_RGBX8888: formatType = "RGBA"; break;
-	case ULTRA_FB_FORMAT_XRGB8888: formatType = "ARGB"; break;
+	case ULTRA_FB_FORMAT_RGB888:
+		formatType                   = "RGB";
+		userdata->Framebuffer.Format = FramebufferFormatRGB8;
+		break;
+	case ULTRA_FB_FORMAT_BGR888:
+		formatType                   = "BGR";
+		userdata->Framebuffer.Format = FramebufferFormatBGR8;
+		break;
+	case ULTRA_FB_FORMAT_RGBX8888:
+		formatType                   = "RGBA";
+		userdata->Framebuffer.Format = FramebufferFormatRGBA8;
+		break;
+	case ULTRA_FB_FORMAT_XRGB8888:
+		formatType                   = "ARGB";
+		userdata->Framebuffer.Format = FramebufferFormatARGB8;
+		break;
 	default: formatType = "Unknown"; break;
 	}
 	DebugCon_WriteFormatted("Framebuffer %ux%u(%u) %hubpp %s %016lx\r\n",

@@ -1,9 +1,0 @@
-load ASCII.bmp
-def   chars:0->15  size:9x9 img:0,0->143,8
-def  chars:17->31  size:9x9 img:0,9->143,17
-def  chars:32->47  size:9x9 img:0,18->143,26
-def  chars:48->63  size:9x9 img:0,27->143,35
-def  chars:64->79  size:9x9 img:0,36->143,44
-def  chars:80->95  size:9x9 img:0,45->143,53
-def  chars:96->111 size:9x9 img:0,54->143,62
-def chars:112->127 size:9x9 img:0,64->143,71

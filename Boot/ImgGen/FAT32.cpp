@@ -249,6 +249,7 @@ namespace FAT32
 
 		auto nameutf16 = UTF8ToUTF16(name);
 		char shortName[11];
+		memset(shortName, 0, 11);
 		bool lowercaseName = false, lowercaseExt = false;
 		bool isShortName = FillShortname(nameutf16, shortName, lowercaseName, lowercaseExt);
 		if (!isShortName)
@@ -406,6 +407,7 @@ namespace FAT32
 
 		auto nameutf16 = UTF8ToUTF16(name);
 		char shortName[11];
+		memset(shortName, 0, 11);
 		bool lowercaseName = false, lowercaseExt = false;
 		bool isShortName = FillShortname(nameutf16, shortName, lowercaseName, lowercaseExt);
 		if (!isShortName)
