@@ -324,14 +324,29 @@ void OnLoad(ProgramState& state, const std::vector<std::string_view>& args)
 	state.SourceBitmap.Bitdepth    = header->bpp;
 	state.SourceBitmap.PaddedWidth = (state.SourceBitmap.Bitdepth * state.SourceBitmap.Width + 7) / 8;
 	size_t bmpPaddedWidth          = ((size_t) state.SourceBitmap.Bitdepth * state.SourceBitmap.Width + 31) / 32 * 4;
+	state.SourceBitmap.Bits.clear();
 	state.SourceBitmap.Bits.resize(state.SourceBitmap.PaddedWidth * state.SourceBitmap.Height);
-	size_t   pixelArrayOffset = (header->offsetHigh << 16) | header->offsetLow;
-	uint8_t* bmpPixelArray    = fileData.data() + pixelArrayOffset;
+	size_t    pixelArrayOffset = (header->offsetHigh << 16) | header->offsetLow;
+	uint32_t* bmpColorTable    = (uint32_t*) (fileData.data() + sizeof(BMPHeader));
+	uint8_t*  bmpPixelArray    = fileData.data() + pixelArrayOffset;
 	for (size_t y = 0; y < state.SourceBitmap.Height; ++y)
 	{
-		size_t destOffset   = y * state.SourceBitmap.PaddedWidth;
-		size_t sourceOffset = (state.SourceBitmap.Height - y - 1) * bmpPaddedWidth;
-		memcpy(state.SourceBitmap.Bits.data() + destOffset, bmpPixelArray + sourceOffset, state.SourceBitmap.PaddedWidth);
+		size_t destOffset   = 8 * y * state.SourceBitmap.PaddedWidth;
+		size_t sourceOffset = (state.SourceBitmap.Height - y - 1) * bmpPaddedWidth * 8;
+		for (size_t x = 0; x < state.SourceBitmap.PaddedWidth * 8; ++x)
+		{
+			uint8_t  temp = (bmpPixelArray[sourceOffset >> 3] >> (sourceOffset & 7)) & 1;
+			uint32_t col  = bmpColorTable[temp];
+			if (((col >> 16) & 0xFF) > 0x7F ||
+				((col >> 8) & 0xFF) > 0x7F ||
+				(col & 0xFF) > 0x7F)
+				temp = 1;
+			else
+				temp = 0;
+			state.SourceBitmap.Bits[destOffset >> 3] |= temp << (destOffset & 7);
+			++destOffset;
+			++sourceOffset;
+		}
 	}
 }
 
@@ -436,7 +451,7 @@ void OnDef(ProgramState& state, const std::vector<std::string_view>& args)
 			size_t sourceBit = state.SourceBitmap.Bitdepth * charX + (charY + y) * state.SourceBitmap.PaddedWidth * 8;
 			for (size_t x = 0; x < state.CharWidth * width; ++x)
 			{
-				uint8_t temp                   = !((state.SourceBitmap.Bits[sourceBit / 8] >> (7 - (sourceBit % 8))) & 1);
+				uint8_t temp                   = (state.SourceBitmap.Bits[sourceBit / 8] >> (7 - (sourceBit % 8))) & 1;
 				character.Bitmap[destBit / 8] |= temp << (destBit % 8);
 				destBit                       += state.Bitdepth;
 				sourceBit                     += state.SourceBitmap.Bitdepth;
