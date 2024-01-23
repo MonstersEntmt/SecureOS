@@ -43,9 +43,15 @@ void*   CPUStackAlloc(void);
 
 void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 {
+	DebugCon_WriteFormatted("BootContext: 0x%016lX, magix: %08X\n", (uint64_t) bootContext, magic);
+	if (!bootContext)
+	{
+		DebugCon_WriteFormatted("BootContext is nullptr\n");
+		return;
+	}
 	if (magic != ULTRA_MAGIC)
 	{
-		DebugCon_WriteFormatted("Entry magic %08X is not %08X\r\n", magic, ULTRA_MAGIC);
+		DebugCon_WriteFormatted("Entry magic %08X is not %08X\n", magic, ULTRA_MAGIC);
 		return;
 	}
 
@@ -72,6 +78,7 @@ void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 #endif
 
 	struct KernelStartupData kernelStartupData;
+	memset(&kernelStartupData, 0, sizeof(struct KernelStartupData));
 
 	{
 		struct ultra_attribute_header* curAttribute = bootContext->attributes;
@@ -164,6 +171,7 @@ void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 	}
 
 	GraphicsDrawRect(&kernelStartupData.Framebuffer, (struct GraphicsRect) { .x = 0, .y = 0, .w = kernelStartupData.Framebuffer.Width, .h = kernelStartupData.Framebuffer.Height }, (struct LinearColor) { .r = 0, .g = 0, .b = 0, .a = 65535 }, (struct LinearColor) { .r = 0, .g = 0, .b = 0, .a = 65535 });
+	GraphicsDrawRect(&kernelStartupData.Framebuffer, (struct GraphicsRect) { .x = 10, .y = 100, .w = 100, .h = 100 }, (struct LinearColor) { .r = 65535, .g = 0, .b = 0, .a = 65535 }, (struct LinearColor) { .r = 65535, .g = 0, .b = 65535, .a = 65535 });
 
 	LoadFont((struct FontHeader*) kernelStartupData.BasicLatin);
 	GraphicsDrawText(&kernelStartupData.Framebuffer, (struct GraphicsPoint) { .x = 5, .y = 5 }, "This is some test text\nWith multiple lines and with invalid characters \0\1\2\3\4 What'ya think?\nAnd also text\rover text,\ttabs too, but badly... Oh and also '\xFF' this :>", 163, (struct LinearColor) { .r = 65535, .g = 65535, .b = 65535, .a = 65535 });
@@ -233,7 +241,7 @@ void VisitUltraAttribute(struct ultra_attribute_header* attribute, struct Kernel
 
 void VisitUltraInvalidAttribute(struct KernelStartupData* userdata)
 {
-	DebugCon_WriteString("ERROR: Invalid Ultra attribute encountered\r\n");
+	DebugCon_WriteString("ERROR: Invalid Ultra attribute encountered\n");
 }
 
 void VisitUltraPlatformInfoAttribute(struct ultra_platform_info_attribute* attribute, struct KernelStartupData* userdata)
@@ -247,7 +255,7 @@ void VisitUltraPlatformInfoAttribute(struct ultra_platform_info_attribute* attri
 	default: platformType = "Unknown"; break;
 	}
 
-	DebugCon_WriteFormatted("Loaded by %s v%hu.%hu through %s\r\n",
+	DebugCon_WriteFormatted("Loaded by %s v%hu.%hu through %s\n",
 							attribute->loader_name,
 							attribute->loader_major,
 							attribute->loader_minor,
@@ -258,7 +266,7 @@ void VisitUltraPlatformInfoAttribute(struct ultra_platform_info_attribute* attri
 
 void VisitUltraKernelInfoAttribute(struct ultra_kernel_info_attribute* attribute, struct KernelStartupData* userdata)
 {
-	DebugCon_WriteFormatted("Kernel loaded at %016lx(%016lx) -> %016lx(%lu)\r\n",
+	DebugCon_WriteFormatted("Kernel loaded at %016lx(%016lx) -> %016lx(%lu)\n",
 							attribute->virtual_base,
 							attribute->physical_base,
 							attribute->virtual_base + attribute->size,
@@ -306,7 +314,7 @@ void VisitUltraModuleInfoAttribute(struct ultra_module_info_attribute* attribute
 	case ULTRA_MODULE_TYPE_MEMORY: moduleType = "Memory"; break;
 	default: moduleType = "Unknown"; break;
 	}
-	DebugCon_WriteFormatted("%s Module %s %016lx -> %016lx(%lu)\r\n",
+	DebugCon_WriteFormatted("%s Module %s %016lx -> %016lx(%lu)\n",
 							moduleType,
 							attribute->name,
 							attribute->address,
@@ -319,7 +327,7 @@ void VisitUltraModuleInfoAttribute(struct ultra_module_info_attribute* attribute
 
 void VisitUltraCommandLineAttribute(struct ultra_command_line_attribute* attribute, struct KernelStartupData* userdata)
 {
-	DebugCon_WriteFormatted("Command line: %s\r\n", attribute->text);
+	DebugCon_WriteFormatted("Command line: %s\n", attribute->text);
 }
 
 void VisitUltraFramebufferAttribute(struct ultra_framebuffer_attribute* attribute, struct KernelStartupData* userdata)
@@ -352,7 +360,7 @@ void VisitUltraFramebufferAttribute(struct ultra_framebuffer_attribute* attribut
 		break;
 	default: formatType = "Unknown"; break;
 	}
-	DebugCon_WriteFormatted("Framebuffer %ux%u(%u) %hubpp %s %016lx\r\n",
+	DebugCon_WriteFormatted("Framebuffer %ux%u(%u) %hubpp %s %016lx\n",
 							attribute->fb.width,
 							attribute->fb.height,
 							attribute->fb.pitch,

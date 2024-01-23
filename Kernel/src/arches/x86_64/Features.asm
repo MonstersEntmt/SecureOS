@@ -1,12 +1,14 @@
 %include "x86_64/Build.asminc"
 
 GlobalLabel x86_64FeatureEnable ; bool x86_64FeatureEnable(void)
+    push rbx
     mov eax, 0x80000001
     cpuid
     shr edx, 20
     bt edx, 0
     jc .Valid
     mov rax, 0
+    pop rbx
     ret
     
 .Valid:
@@ -16,4 +18,5 @@ GlobalLabel x86_64FeatureEnable ; bool x86_64FeatureEnable(void)
     wrmsr
 
     mov rax, 1
+    pop rbx
     ret
