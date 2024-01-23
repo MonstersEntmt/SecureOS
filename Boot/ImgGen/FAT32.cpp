@@ -35,7 +35,7 @@ namespace FAT32
 		state.Header.Media               = 0xF8;
 		state.Header.FATSize16           = 0;
 		state.Header.SectorsPerTrack     = 0x3F;
-		state.Header.NumHeads            = 0x80;
+		state.Header.NumHeads            = 0xFF;
 		state.Header.HiddenSectors       = (uint32_t) std::min<uint64_t>(state.FirstLBA, 0xFFFF'FFFF);
 		state.Header.TotalSectors32      = (uint32_t) std::min<uint64_t>(state.LastLBA - state.FirstLBA, 0xFFFF'FFFF);
 

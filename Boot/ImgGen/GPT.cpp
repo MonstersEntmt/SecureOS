@@ -68,22 +68,60 @@ namespace GPT
 
 	void WriteProtectiveMBR(GPTState& state, std::fstream& imageStream)
 	{
-		uint64_t mbrSectorCount = std::min<uint64_t>(state.Header.BackupLBA + 1, 0xFFFF'FFFE);
-		uint64_t partitionRecord[2];
-		partitionRecord[0] = 0xFFFE'FEEE'0001'0080;
-		partitionRecord[1] = 0x0000'0000'0000'0001 | (mbrSectorCount << 32);
+		struct MBRPartitionRecord
+		{
+			uint8_t  BootIndicator;
+			uint8_t  StartingCHS[3];
+			uint8_t  OSType;
+			uint8_t  EndingCHS[3];
+			uint16_t StartingLBALow;
+			uint16_t StartingLBAHigh;
+			uint16_t SizeInLBALow;
+			uint16_t SizeInLBAHigh;
+		};
+		struct ProtectiveMBR
+		{
+			uint32_t           Signature;
+			uint16_t           Unknown;
+			MBRPartitionRecord Partitions[4];
+			uint16_t           BootSignature;
+		};
+
+		uint64_t cylinder = state.Header.BackupLBA + 1;
+		uint64_t sector   = cylinder % 63;
+		cylinder         /= 63;
+		uint64_t head     = cylinder & 255;
+		cylinder        >>= 8;
+		if (cylinder > 1023)
+		{
+			cylinder = 1023;
+			head     = 255;
+			sector   = 63;
+		}
+
+		uint32_t size = (uint32_t) std::min<uint64_t>(state.Header.BackupLBA, 0xFFFF'FFFF);
+
+		ProtectiveMBR header {
+			.Signature  = 0,
+			.Unknown    = 0,
+			.Partitions = {
+						   { .BootIndicator   = 0x00,
+				  .StartingCHS     = { 0x00, 0x02, 0x00 },
+				  .OSType          = 0xEE,
+				  .EndingCHS       = { (uint8_t) head, (uint8_t) (sector | ((cylinder >> 8) & 0xC0)), (uint8_t) cylinder },
+				  .StartingLBALow  = 1,
+				  .StartingLBAHigh = 0,
+				  .SizeInLBALow    = (uint16_t) size,
+				  .SizeInLBAHigh   = (uint16_t) (size >> 16) },
+						   {},
+						   {},
+						   {} },
+			.BootSignature = 0xAA55
+		};
 
 		imageStream.seekp(0);
 		imageStream.write((const char*) c_LegacyBootProtection, 440);
-		imageStream.write("\x00\x00\x00\x00", 4);
-		imageStream.write("\x00\x00", 2);
-		imageStream.write((const char*) &partitionRecord, 16);
-		partitionRecord[0] = 0;
-		partitionRecord[1] = 0;
-		imageStream.write((const char*) &partitionRecord, 16);
-		imageStream.write((const char*) &partitionRecord, 16);
-		imageStream.write((const char*) &partitionRecord, 16);
-		imageStream.write("\x55\xAA", 2);
+		imageStream.write((const char*) &header, sizeof(header));
 	}
 
 	void WriteGPTHeader(const GPTHeader& header, std::fstream& imageStream)
