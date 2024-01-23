@@ -576,6 +576,11 @@ namespace FAT32
 			lowercaseExt = true;
 		else
 			needsLongName = true;
+		if (needsLongName)
+		{
+			lowercaseName = false;
+			lowercaseExt  = false;
+		}
 		return !needsLongName;
 	}
 
