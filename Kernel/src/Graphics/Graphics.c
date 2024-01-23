@@ -215,10 +215,10 @@ void GraphicsDrawText(struct Framebuffer* framebuffer, struct GraphicsPoint pos,
 		{
 		case '\r': currentX = pos.x; continue;
 		case '\n':
-			currentX  = pos.x + 2;
+			currentX  = pos.x;
 			currentY += g_FontHeight + 2;
 			continue;
-		case '\t': currentX += 4 * g_FontWidth + 2; continue;
+		case '\t': currentX += 4 * (g_FontWidth + 2); continue;
 		case ' ': currentX += g_FontWidth + 2; continue;
 		}
 
@@ -253,10 +253,10 @@ void GraphicsDrawText(struct Framebuffer* framebuffer, struct GraphicsPoint pos,
 			for (size_t x = 0; x < character->Width * g_FontWidth; ++x)
 			{
 				if ((((uint8_t*) character->BitmapAddress)[bitOffset >> 3] >> (bitOffset & 7)) & 1)
-					GraphicsSetPixel(framebuffer, currentX + x, currentY + y, color);
+					GraphicsSetPixel(framebuffer, currentX + x + character->Width, currentY + y, color);
 				++bitOffset;
 			}
 		}
-		currentX += character->Width * g_FontWidth + 2;
+		currentX += character->Width * (g_FontWidth + 2);
 	}
 }
