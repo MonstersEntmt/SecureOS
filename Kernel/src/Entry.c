@@ -15,6 +15,7 @@
 	#include "x86_64/IDT.h"
 	#include "x86_64/InterruptHandlers.h"
 	#include "x86_64/Trampoline.h"
+	#include "x86_64/Features.h"
 #endif
 
 struct KernelStartupData
@@ -50,6 +51,11 @@ void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 
 #if BUILD_IS_ARCH_X86_64
 	DisableInterrupts();
+	if (!x86_64FeatureEnable())
+	{
+		DebugCon_WriteFormatted("Your CPU does not support required features, terminating\n");
+		return;
+	}
 	x86_64GDTClearDescriptors();
 	x86_64GDTSetNullDescriptor(0);
 	x86_64GDTSetCodeDescriptor(1, 0, false);
@@ -80,8 +86,6 @@ void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 	HandleACPITables(kernelStartupData.RsdpAddress);
 	PMMReclaim();
 
-	LoadFont((struct FontHeader*) kernelStartupData.BasicLatin);
-
 	{
 		struct PMMMemoryStats memoryStats;
 		PMMGetMemoryStats(&memoryStats);
@@ -94,6 +98,9 @@ void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 		DebugCon_WriteFormatted("Kernel VMM Stats:\n  Footprint: %lu\n  Pages Allocated: %lu\n", (memoryStats.AllocatorFootprint + 4095) / 4096, memoryStats.PagesAllocated);
 	}
 
+	uint8_t  lapicCount = 0;
+	uint8_t* lapicIDs   = GetLAPICIDs(&lapicCount);
+	if (lapicCount > 1)
 	{
 		void*   kernelPageTable        = GetKernelPageTable();
 		uint8_t kernelPageTableLevels  = 0;
@@ -116,8 +123,6 @@ void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 
 		void*     lapicAddress   = GetLAPICAddress();
 		uint32_t* lapicRegisters = (uint32_t*) lapicAddress;
-		uint8_t   lapicCount     = 0;
-		uint8_t*  lapicIDs       = GetLAPICIDs(&lapicCount);
 
 		g_LapicWaitLock = true;
 		for (size_t i = 1; i < lapicCount; ++i) // Hoping implementations uphold the ACPI specification with first lapicID being the boot core
@@ -159,6 +164,8 @@ void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 	}
 
 	GraphicsDrawRect(&kernelStartupData.Framebuffer, (struct GraphicsRect) { .x = 0, .y = 0, .w = kernelStartupData.Framebuffer.Width, .h = kernelStartupData.Framebuffer.Height }, (struct LinearColor) { .r = 0, .g = 0, .b = 0, .a = 65535 }, (struct LinearColor) { .r = 0, .g = 0, .b = 0, .a = 65535 });
+
+	LoadFont((struct FontHeader*) kernelStartupData.BasicLatin);
 	GraphicsDrawText(&kernelStartupData.Framebuffer, (struct GraphicsPoint) { .x = 5, .y = 5 }, "This is some test text\nWith multiple lines and with invalid characters \0\1\2\3\4 What'ya think?\nAnd also text\rover text,\ttabs too, but badly... Oh and also '\xFF' this :>", 163, (struct LinearColor) { .r = 65535, .g = 65535, .b = 65535, .a = 65535 });
 
 	CPUHalt();
@@ -306,7 +313,7 @@ void VisitUltraModuleInfoAttribute(struct ultra_module_info_attribute* attribute
 							attribute->address + attribute->size,
 							attribute->size);
 
-	if (strcmp(attribute->name, "bsclatin.fnt") == 0)
+	if (strcmp(attribute->name, "basic-latin.font") == 0)
 		userdata->BasicLatin = (void*) attribute->address;
 }
 
