@@ -1,6 +1,7 @@
 #include "Graphics/Graphics.h"
 #include "DebugCon.h"
 #include "KernelVMM.h"
+#include "Log.h"
 #include "PMM.h"
 #include "VMM.h"
 
@@ -22,7 +23,6 @@ void LoadFont(struct FontHeader* font)
 	if (!font)
 		return;
 
-
 	void* kernelPagetable = GetKernelPageTable();
 	if (!g_FontCharacters)
 	{
@@ -42,7 +42,7 @@ void LoadFont(struct FontHeader* font)
 			physicalAddress = PMMAlloc(1);
 			if (!physicalAddress)
 			{
-				DebugCon_WriteFormatted("Failed to allocate page for font\n");
+				LogCritical("Graphics", "Failed to allocate page for font");
 				break;
 			}
 			memset(physicalAddress, 0, 4096);
@@ -247,14 +247,15 @@ void GraphicsDrawText(struct Framebuffer* framebuffer, struct GraphicsPoint pos,
 		}
 
 		size_t paddedWidth = ((size_t) character->Width * g_FontWidth + 7) & ~7;
-		for (size_t y = 0; y < g_FontHeight; ++y)
+		size_t lastY       = g_FontHeight < (framebuffer->Height - currentY) ? g_FontHeight : (framebuffer->Height - currentY);
+		size_t lastX       = character->Width * g_FontWidth < (framebuffer->Width - currentX - character->Width) ? character->Width * g_FontWidth : (framebuffer->Width - currentX - character->Width);
+		for (size_t y = 0; y < lastY; ++y)
 		{
-			size_t bitOffset = y * paddedWidth;
-			for (size_t x = 0; x < character->Width * g_FontWidth; ++x)
+			for (size_t x = 0; x < lastX; ++x)
 			{
+				size_t bitOffset = y * paddedWidth + x;
 				if ((((uint8_t*) character->BitmapAddress)[bitOffset >> 3] >> (bitOffset & 7)) & 1)
 					GraphicsSetPixel(framebuffer, currentX + x + character->Width, currentY + y, color);
-				++bitOffset;
 			}
 		}
 		currentX += character->Width * (g_FontWidth + 2);

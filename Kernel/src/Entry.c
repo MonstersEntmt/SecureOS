@@ -4,6 +4,7 @@
 #include "Graphics/Graphics.h"
 #include "Halt.h"
 #include "KernelVMM.h"
+#include "Log.h"
 #include "PMM.h"
 #include "Ultra/UltraProtocol.h"
 #include "VMM.h"
@@ -27,14 +28,8 @@ struct KernelStartupData
 	void* BasicLatin;
 };
 
-static void VisitUltraInvalidAttribute(struct KernelStartupData* userdata);
-static void VisitUltraPlatformInfoAttribute(struct ultra_platform_info_attribute* attribute, struct KernelStartupData* userdata);
-static void VisitUltraKernelInfoAttribute(struct ultra_kernel_info_attribute* attribute, struct KernelStartupData* userdata);
-static void VisitUltraMemoryMapAttribute(struct ultra_memory_map_attribute* attribute, struct KernelStartupData* userdata);
-static void VisitUltraModuleInfoAttribute(struct ultra_module_info_attribute* attribute, struct KernelStartupData* userdata);
-static void VisitUltraCommandLineAttribute(struct ultra_command_line_attribute* attribute, struct KernelStartupData* userdata);
-static void VisitUltraFramebufferAttribute(struct ultra_framebuffer_attribute* attribute, struct KernelStartupData* userdata);
-static void VisitUltraAttribute(struct ultra_attribute_header* attribute, struct KernelStartupData* userdata);
+static bool UltraProtocolMemoryMapConverter(void* userdata, size_t index, struct PMMMemoryMapEntry* entry);
+static void UltraProtocolPrintAttributes(struct ultra_attribute_header* firstAttribute, uint32_t attributeCount);
 
 bool    g_LapicWaitLock = false;
 uint8_t g_LapicsRunning = 0;
@@ -43,15 +38,17 @@ void*   CPUStackAlloc(void);
 
 void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 {
-	DebugCon_WriteFormatted("BootContext: 0x%016lX, magix: %08X\n", (uint64_t) bootContext, magic);
+	LogDebugFormatted("Entry", "BootContext: 0x%016lX, magic: %08X", (uint64_t) bootContext, magic);
 	if (!bootContext)
 	{
-		DebugCon_WriteFormatted("BootContext is nullptr\n");
+		LogCritical("Entry", "BootContext is nullptr");
+		CPUHalt();
 		return;
 	}
 	if (magic != ULTRA_MAGIC)
 	{
-		DebugCon_WriteFormatted("Entry magic %08X is not %08X\n", magic, ULTRA_MAGIC);
+		LogCriticalFormatted("Entry", "Magic %08X is not %08X", magic, ULTRA_MAGIC);
+		CPUHalt();
 		return;
 	}
 
@@ -59,7 +56,8 @@ void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 	DisableInterrupts();
 	if (!x86_64FeatureEnable())
 	{
-		DebugCon_WriteFormatted("Your CPU does not support required features, terminating\n");
+		LogCritical("Entry", "Your CPU does not support required features, terminating");
+		CPUHalt();
 		return;
 	}
 	x86_64GDTClearDescriptors();
@@ -84,31 +82,86 @@ void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 		struct ultra_attribute_header* curAttribute = bootContext->attributes;
 		for (uint32_t i = 0; i < bootContext->attribute_count; ++i)
 		{
-			VisitUltraAttribute(curAttribute, &kernelStartupData);
+			switch (curAttribute->type)
+			{
+			case ULTRA_ATTRIBUTE_PLATFORM_INFO:
+			{
+				struct ultra_platform_info_attribute* platformAttrib = (struct ultra_platform_info_attribute*) curAttribute;
+				kernelStartupData.RsdpAddress                        = (void*) platformAttrib->acpi_rsdp_address;
+				break;
+			}
+			case ULTRA_ATTRIBUTE_MODULE_INFO:
+			{
+				struct ultra_module_info_attribute* moduleAttrib = (struct ultra_module_info_attribute*) curAttribute;
+				if (strcmp(moduleAttrib->name, "basic-latin.font") == 0)
+				{
+					kernelStartupData.BasicLatin = (void*) moduleAttrib->address;
+					break;
+				}
+				break;
+			}
+			case ULTRA_ATTRIBUTE_MEMORY_MAP:
+			{
+				struct ultra_memory_map_attribute* memMapAttrib = (struct ultra_memory_map_attribute*) curAttribute;
+
+				size_t entryCount = ULTRA_MEMORY_MAP_ENTRY_COUNT(*curAttribute);
+				PMMInit(entryCount, UltraProtocolMemoryMapConverter, memMapAttrib);
+				break;
+			}
+			case ULTRA_ATTRIBUTE_FRAMEBUFFER_INFO:
+			{
+				struct ultra_framebuffer_attribute* fbAttrib = (struct ultra_framebuffer_attribute*) curAttribute;
+				kernelStartupData.Framebuffer.Width          = fbAttrib->fb.width;
+				kernelStartupData.Framebuffer.Height         = fbAttrib->fb.height;
+				kernelStartupData.Framebuffer.Pitch          = fbAttrib->fb.pitch;
+				kernelStartupData.Framebuffer.Content        = (void*) fbAttrib->fb.physical_address;
+				kernelStartupData.Framebuffer.Colorspace     = FramebufferColorspaceSRGB;
+				switch (fbAttrib->fb.format)
+				{
+				case ULTRA_FB_FORMAT_RGB888: kernelStartupData.Framebuffer.Format = FramebufferFormatRGB8; break;
+				case ULTRA_FB_FORMAT_BGR888: kernelStartupData.Framebuffer.Format = FramebufferFormatBGR8; break;
+				case ULTRA_FB_FORMAT_RGBX8888: kernelStartupData.Framebuffer.Format = FramebufferFormatRGBA8; break;
+				case ULTRA_FB_FORMAT_XRGB8888: kernelStartupData.Framebuffer.Format = FramebufferFormatARGB8; break;
+				}
+				break;
+			}
+			}
 			curAttribute = ULTRA_NEXT_ATTRIBUTE(curAttribute);
 		}
 	}
 
 	KernelVMMInit();
+	LoadFont((struct FontHeader*) kernelStartupData.BasicLatin);
+	LogInit(&kernelStartupData.Framebuffer);
+	UltraProtocolPrintAttributes(bootContext->attributes, bootContext->attribute_count);
 	HandleACPITables(kernelStartupData.RsdpAddress);
 	PMMReclaim();
 
 	{
 		struct PMMMemoryStats memoryStats;
 		PMMGetMemoryStats(&memoryStats);
-		DebugCon_WriteFormatted("PMM Stats:\n  Footprint: %lu\n  Last Usable Address: 0x%016lu\n  Last Address: 0x%016lu\n  Pages Taken: %lu\n  Pages Free: %lu\n", (memoryStats.AllocatorFootprint + 4095) / 4096, memoryStats.LastUsableAddress, memoryStats.LastAddress, memoryStats.PagesTaken, memoryStats.PagesFree);
+		LogDebugFormatted("PMM", "Address:             0x%016lX", memoryStats.AllocatorAddress);
+		LogDebugFormatted("PMM", "Footprint:           %lu", (memoryStats.AllocatorFootprint + 4095) / 4096);
+		LogDebugFormatted("PMM", "Last Usable Address: 0x%016lX", memoryStats.LastUsableAddress);
+		LogDebugFormatted("PMM", "Last Address:        0x%016lX", memoryStats.LastAddress);
+		LogDebugFormatted("PMM", "Pages Taken:         0x%016lX", memoryStats.PagesTaken);
+		LogDebugFormatted("PMM", "Pages Free:          0x%016lX", memoryStats.PagesFree);
 	}
 
 	{
+		void*                 kernelPageTable = GetKernelPageTable();
 		struct VMMMemoryStats memoryStats;
-		VMMGetMemoryStats(GetKernelPageTable(), &memoryStats);
-		DebugCon_WriteFormatted("Kernel VMM Stats:\n  Footprint: %lu\n  Pages Allocated: %lu\n", (memoryStats.AllocatorFootprint + 4095) / 4096, memoryStats.PagesAllocated);
+		VMMGetMemoryStats(kernelPageTable, &memoryStats);
+		LogDebugFormatted("VMM", "Address:         0x%016lX", (uint64_t) kernelPageTable);
+		LogDebugFormatted("VMM", "Footprint:       %lu", (memoryStats.AllocatorFootprint + 4095) / 4096);
+		LogDebugFormatted("VMM", "Pages Allocated: %lu", memoryStats.PagesAllocated);
 	}
 
 	uint8_t  lapicCount = 0;
 	uint8_t* lapicIDs   = GetLAPICIDs(&lapicCount);
 	if (lapicCount > 1)
 	{
+		LogDebugFormatted("SMP", "Booting up %hhu additional cores", lapicCount - 1);
 		void*   kernelPageTable        = GetKernelPageTable();
 		uint8_t kernelPageTableLevels  = 0;
 		bool    kernelPageTableUse1GiB = false;
@@ -143,6 +196,8 @@ void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 				.Ack   = 0
 			};
 
+			LogDebugFormatted("SMP", "Sending startup IPI to core %hhu", id);
+
 			lapicRegisters[0xA0] = 0;
 			lapicRegisters[0xC4] = lapicRegisters[0xC4] & 0x00FF'FFFF | (id << 24);
 			lapicRegisters[0xC0] = lapicRegisters[0xC0] & 0xFFF0'0000 | 0xC500;
@@ -161,20 +216,16 @@ void kernel_entry(struct ultra_boot_context* bootContext, uint32_t magic)
 			}
 
 			while (!trampolineStats->Alive); // Wait for cpu to be alive
+			LogDebugFormatted("SMP", "Core %hhu alive", id);
 			trampolineStats->Ack = true;
 
 			while (g_LapicsRunning == pLapicsRunning); // Synchronize with lapic bootstrap
+			LogDebugFormatted("SMP", "Core %hhu booted", id);
 		}
 		g_LapicWaitLock = false;
 
 		PMMFree(tempRootPageTable, 1);
 	}
-
-	GraphicsDrawRect(&kernelStartupData.Framebuffer, (struct GraphicsRect) { .x = 0, .y = 0, .w = kernelStartupData.Framebuffer.Width, .h = kernelStartupData.Framebuffer.Height }, (struct LinearColor) { .r = 0, .g = 0, .b = 0, .a = 65535 }, (struct LinearColor) { .r = 0, .g = 0, .b = 0, .a = 65535 });
-	GraphicsDrawRect(&kernelStartupData.Framebuffer, (struct GraphicsRect) { .x = 10, .y = 100, .w = 100, .h = 100 }, (struct LinearColor) { .r = 65535, .g = 0, .b = 0, .a = 65535 }, (struct LinearColor) { .r = 65535, .g = 0, .b = 65535, .a = 65535 });
-
-	LoadFont((struct FontHeader*) kernelStartupData.BasicLatin);
-	GraphicsDrawText(&kernelStartupData.Framebuffer, (struct GraphicsPoint) { .x = 5, .y = 5 }, "This is some test text\nWith multiple lines and with invalid characters \0\1\2\3\4 What'ya think?\nAnd also text\rover text,\ttabs too, but badly... Oh and also '\xFF' this :>", 163, (struct LinearColor) { .r = 65535, .g = 65535, .b = 65535, .a = 65535 });
 
 	CPUHalt();
 }
@@ -190,9 +241,8 @@ void CPUTrampoline(uint8_t lapicID)
 	VMMActivate(pageTable);
 
 	++g_LapicsRunning;
+	LogDebug("SMP", "Booted");
 	while (g_LapicWaitLock);
-
-	DebugCon_WriteString("This string will look fucked\n");
 
 	CPUHalt();
 }
@@ -211,69 +261,7 @@ void* CPUStackAlloc(void)
 	return stack + 4 * 4096;
 }
 
-void VisitUltraAttribute(struct ultra_attribute_header* attribute, struct KernelStartupData* userdata)
-{
-	switch (attribute->type)
-	{
-	case ULTRA_ATTRIBUTE_INVALID:
-		VisitUltraInvalidAttribute(userdata);
-		break;
-	case ULTRA_ATTRIBUTE_PLATFORM_INFO:
-		VisitUltraPlatformInfoAttribute((struct ultra_platform_info_attribute*) attribute, userdata);
-		break;
-	case ULTRA_ATTRIBUTE_KERNEL_INFO:
-		VisitUltraKernelInfoAttribute((struct ultra_kernel_info_attribute*) attribute, userdata);
-		break;
-	case ULTRA_ATTRIBUTE_MEMORY_MAP:
-		VisitUltraMemoryMapAttribute((struct ultra_memory_map_attribute*) attribute, userdata);
-		break;
-	case ULTRA_ATTRIBUTE_MODULE_INFO:
-		VisitUltraModuleInfoAttribute((struct ultra_module_info_attribute*) attribute, userdata);
-		break;
-	case ULTRA_ATTRIBUTE_COMMAND_LINE:
-		VisitUltraCommandLineAttribute((struct ultra_command_line_attribute*) attribute, userdata);
-		break;
-	case ULTRA_ATTRIBUTE_FRAMEBUFFER_INFO:
-		VisitUltraFramebufferAttribute((struct ultra_framebuffer_attribute*) attribute, userdata);
-		break;
-	}
-}
-
-void VisitUltraInvalidAttribute(struct KernelStartupData* userdata)
-{
-	DebugCon_WriteString("ERROR: Invalid Ultra attribute encountered\n");
-}
-
-void VisitUltraPlatformInfoAttribute(struct ultra_platform_info_attribute* attribute, struct KernelStartupData* userdata)
-{
-	const char* platformType;
-	switch (attribute->platform_type)
-	{
-	case ULTRA_PLATFORM_INVALID: platformType = "Invalid"; break;
-	case ULTRA_PLATFORM_BIOS: platformType = "Bios"; break;
-	case ULTRA_PLATFORM_UEFI: platformType = "UEFI"; break;
-	default: platformType = "Unknown"; break;
-	}
-
-	DebugCon_WriteFormatted("Loaded by %s v%hu.%hu through %s\n",
-							attribute->loader_name,
-							attribute->loader_major,
-							attribute->loader_minor,
-							platformType);
-
-	userdata->RsdpAddress = (void*) attribute->acpi_rsdp_address;
-}
-
-void VisitUltraKernelInfoAttribute(struct ultra_kernel_info_attribute* attribute, struct KernelStartupData* userdata)
-{
-	DebugCon_WriteFormatted("Kernel loaded at %016lx(%016lx) -> %016lx(%lu)\n",
-							attribute->virtual_base,
-							attribute->physical_base,
-							attribute->virtual_base + attribute->size,
-							attribute->size);
-}
-
-static bool PMMUltraMemoryMapGetter(void* userdata, size_t index, struct PMMMemoryMapEntry* entry)
+bool UltraProtocolMemoryMapConverter(void* userdata, size_t index, struct PMMMemoryMapEntry* entry)
 {
 	struct ultra_memory_map_attribute* attribute  = (struct ultra_memory_map_attribute*) userdata;
 	size_t                             entryCount = ULTRA_MEMORY_MAP_ENTRY_COUNT(attribute->header);
@@ -298,73 +286,108 @@ static bool PMMUltraMemoryMapGetter(void* userdata, size_t index, struct PMMMemo
 	return true;
 }
 
-void VisitUltraMemoryMapAttribute(struct ultra_memory_map_attribute* attribute, struct KernelStartupData* userdata)
+void UltraProtocolPrintAttributes(struct ultra_attribute_header* curAttribute, uint32_t attributeCount)
 {
-	size_t entryCount = ULTRA_MEMORY_MAP_ENTRY_COUNT(attribute->header);
-	PMMInit(entryCount, PMMUltraMemoryMapGetter, attribute);
-}
-
-void VisitUltraModuleInfoAttribute(struct ultra_module_info_attribute* attribute, struct KernelStartupData* userdata)
-{
-	const char* moduleType;
-	switch (attribute->type)
+#if BUILD_IS_CONFIG_DEBUG
+	for (size_t i = 0; i < attributeCount; ++i)
 	{
-	case ULTRA_MODULE_TYPE_INVALID: moduleType = "Invalid"; break;
-	case ULTRA_MODULE_TYPE_FILE: moduleType = "File"; break;
-	case ULTRA_MODULE_TYPE_MEMORY: moduleType = "Memory"; break;
-	default: moduleType = "Unknown"; break;
+		switch (curAttribute->type)
+		{
+		case ULTRA_ATTRIBUTE_INVALID:
+		{
+			LogDebugFormatted("Ultra", "Invalid attribute %lu", i);
+			break;
+		}
+		case ULTRA_ATTRIBUTE_PLATFORM_INFO:
+		{
+			struct ultra_platform_info_attribute* platformAttrib = (struct ultra_platform_info_attribute*) curAttribute;
+
+			const char* platformType;
+			switch (platformAttrib->platform_type)
+			{
+			case ULTRA_PLATFORM_INVALID: platformType = "Invalid"; break;
+			case ULTRA_PLATFORM_BIOS: platformType = "Bios"; break;
+			case ULTRA_PLATFORM_UEFI: platformType = "UEFI"; break;
+			default: platformType = "Unknown"; break;
+			}
+
+			LogDebugFormatted("Ultra",
+							  "Loaded by %s v%hu.%hu through %s",
+							  platformAttrib->loader_name,
+							  platformAttrib->loader_major,
+							  platformAttrib->loader_minor,
+							  platformType);
+			break;
+		}
+		case ULTRA_ATTRIBUTE_KERNEL_INFO:
+		{
+			struct ultra_kernel_info_attribute* kernelAttrib = (struct ultra_kernel_info_attribute*) curAttribute;
+
+			LogDebugFormatted("Ultra",
+							  "Kernel loaded at %016lx(%016lx) -> %016lx(%lu)",
+							  kernelAttrib->virtual_base,
+							  kernelAttrib->physical_base,
+							  kernelAttrib->virtual_base + kernelAttrib->size,
+							  kernelAttrib->size);
+			break;
+		}
+		case ULTRA_ATTRIBUTE_MEMORY_MAP:
+		{
+			break;
+		}
+		case ULTRA_ATTRIBUTE_MODULE_INFO:
+		{
+			struct ultra_module_info_attribute* moduleAttrib = (struct ultra_module_info_attribute*) curAttribute;
+
+			const char* moduleType;
+			switch (moduleAttrib->type)
+			{
+			case ULTRA_MODULE_TYPE_INVALID: moduleType = "Invalid"; break;
+			case ULTRA_MODULE_TYPE_FILE: moduleType = "File"; break;
+			case ULTRA_MODULE_TYPE_MEMORY: moduleType = "Memory"; break;
+			default: moduleType = "Unknown"; break;
+			}
+			LogDebugFormatted("Ultra",
+							  "%s Module %s %016lx -> %016lx(%lu)",
+							  moduleType,
+							  moduleAttrib->name,
+							  moduleAttrib->address,
+							  moduleAttrib->address + moduleAttrib->size,
+							  moduleAttrib->size);
+			break;
+		}
+		case ULTRA_ATTRIBUTE_COMMAND_LINE:
+		{
+			struct ultra_command_line_attribute* cmdAttrib = (struct ultra_command_line_attribute*) curAttribute;
+			LogDebugFormatted("Ultra", "Command line: %s", cmdAttrib->text);
+			break;
+		}
+		case ULTRA_ATTRIBUTE_FRAMEBUFFER_INFO:
+		{
+			struct ultra_framebuffer_attribute* fbAttrib = (struct ultra_framebuffer_attribute*) curAttribute;
+
+			const char* formatType;
+			switch (fbAttrib->fb.format)
+			{
+			case ULTRA_FB_FORMAT_INVALID: formatType = "Invalid"; break;
+			case ULTRA_FB_FORMAT_RGB888: formatType = "RGB"; break;
+			case ULTRA_FB_FORMAT_BGR888: formatType = "BGR"; break;
+			case ULTRA_FB_FORMAT_RGBX8888: formatType = "RGBA"; break;
+			case ULTRA_FB_FORMAT_XRGB8888: formatType = "ARGB"; break;
+			default: formatType = "Unknown"; break;
+			}
+			LogDebugFormatted("Ultra",
+							  "Framebuffer %ux%u(%u) %hubpp %s %016lx",
+							  fbAttrib->fb.width,
+							  fbAttrib->fb.height,
+							  fbAttrib->fb.pitch,
+							  fbAttrib->fb.bpp,
+							  formatType,
+							  fbAttrib->fb.physical_address);
+			break;
+		}
+		}
+		curAttribute = ULTRA_NEXT_ATTRIBUTE(curAttribute);
 	}
-	DebugCon_WriteFormatted("%s Module %s %016lx -> %016lx(%lu)\n",
-							moduleType,
-							attribute->name,
-							attribute->address,
-							attribute->address + attribute->size,
-							attribute->size);
-
-	if (strcmp(attribute->name, "basic-latin.font") == 0)
-		userdata->BasicLatin = (void*) attribute->address;
-}
-
-void VisitUltraCommandLineAttribute(struct ultra_command_line_attribute* attribute, struct KernelStartupData* userdata)
-{
-	DebugCon_WriteFormatted("Command line: %s\n", attribute->text);
-}
-
-void VisitUltraFramebufferAttribute(struct ultra_framebuffer_attribute* attribute, struct KernelStartupData* userdata)
-{
-	userdata->Framebuffer.Width      = attribute->fb.width;
-	userdata->Framebuffer.Height     = attribute->fb.height;
-	userdata->Framebuffer.Pitch      = attribute->fb.pitch;
-	userdata->Framebuffer.Content    = (void*) attribute->fb.physical_address;
-	userdata->Framebuffer.Colorspace = FramebufferColorspaceSRGB;
-
-	const char* formatType;
-	switch (attribute->fb.format)
-	{
-	case ULTRA_FB_FORMAT_INVALID: formatType = "Invalid"; break;
-	case ULTRA_FB_FORMAT_RGB888:
-		formatType                   = "RGB";
-		userdata->Framebuffer.Format = FramebufferFormatRGB8;
-		break;
-	case ULTRA_FB_FORMAT_BGR888:
-		formatType                   = "BGR";
-		userdata->Framebuffer.Format = FramebufferFormatBGR8;
-		break;
-	case ULTRA_FB_FORMAT_RGBX8888:
-		formatType                   = "RGBA";
-		userdata->Framebuffer.Format = FramebufferFormatRGBA8;
-		break;
-	case ULTRA_FB_FORMAT_XRGB8888:
-		formatType                   = "ARGB";
-		userdata->Framebuffer.Format = FramebufferFormatARGB8;
-		break;
-	default: formatType = "Unknown"; break;
-	}
-	DebugCon_WriteFormatted("Framebuffer %ux%u(%u) %hubpp %s %016lx\n",
-							attribute->fb.width,
-							attribute->fb.height,
-							attribute->fb.pitch,
-							attribute->fb.bpp,
-							formatType,
-							attribute->fb.physical_address);
+#endif
 }

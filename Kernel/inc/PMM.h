@@ -30,6 +30,7 @@ struct PMMMemoryMapEntry
 
 struct PMMMemoryStats
 {
+	uint64_t AllocatorAddress;
 	uint64_t AllocatorFootprint;
 
 	uint64_t LastUsableAddress;

@@ -1,4 +1,5 @@
 #include "DebugCon.h"
+#include "Log.h"
 #define PMM_USE_FREELIST_LUT 1
 
 // TODO(MarcasRealAccount): Implement allocator selection as a runtime option through the commandline
@@ -257,6 +258,7 @@ void PMMInit(size_t entryCount, PMMGetMemoryMapEntryFn getter, void* userdata)
 		return; // TODO(MarcasRealAccount): Panic
 
 	g_PMM->Stats = (struct PMMMemoryStats) {
+		.AllocatorAddress   = (uint64_t) g_PMM,
 		.AllocatorFootprint = pmmRequiredSize,
 		.LastUsableAddress  = lastUsableAddress,
 		.LastAddress        = lastAddress,
@@ -387,7 +389,8 @@ size_t PMMGetMemoryMap(const struct PMMMemoryMapEntry** entries)
 
 void PMMDebugPrint(void)
 {
-	DebugCon_WriteString("PMM Memory Map:\n");
+	LogLock();
+	LogDebug("PMM", "Memory Map:");
 	for (size_t i = 0; i < g_PMM->MemoryMapCount; ++i)
 	{
 		struct PMMMemoryMapEntry* entry   = &g_PMM->MemoryMap[i];
@@ -408,18 +411,23 @@ void PMMDebugPrint(void)
 		case PMMMemoryMapTypeACPI: typeStr = "ACPI"; break;
 		case PMMMemoryMapTypeNVS: typeStr = "NVS"; break;
 		}
-		DebugCon_WriteFormatted("%20s: 0x%016lX -> 0x%016lx(%lu)\n", typeStr, entry->Start, entry->Start + entry->Size, entry->Size / 4096);
+		LogDebugFormatted("PMM",
+						  "%20s: 0x%016lX -> 0x%016lX(%lu)",
+						  typeStr,
+						  entry->Start,
+						  entry->Start + entry->Size,
+						  entry->Size / 4096);
 	}
 
-	DebugCon_WriteString("PMM Free List:\n");
+	LogDebug("PMM", "Free List:");
 	struct PMMFreeHeader* cur = g_PMM->LUT[0];
 	while (cur)
 	{
-		DebugCon_WriteFormatted("  0x%016lX -> 0x%016lX(%lu)\n", (uint64_t) cur, (uint64_t) cur + cur->Count * 4096, cur->Count);
+		LogDebugFormatted("PMM", "  0x%016lX -> 0x%016lX(%lu)", (uint64_t) cur, (uint64_t) cur + cur->Count * 4096, cur->Count);
 		cur = cur->Next;
 	}
 
-	DebugCon_WriteString("PMM LUT:\n");
+	LogDebug("PMM", "LUT:");
 	cur        = g_PMM->LUT[0];
 	uint8_t pI = 0;
 	for (uint8_t i = 1; i < 255; ++i)
@@ -428,17 +436,18 @@ void PMMDebugPrint(void)
 		if (next != cur)
 		{
 			if (cur)
-				DebugCon_WriteFormatted("  %u -> %u: 0x%016lX -> 0x%016lX(%lu)\n", pI, i - 1, (uint64_t) cur, (uint64_t) cur + cur->Count * 4096, cur->Count);
+				LogDebugFormatted("PMM", "  %u -> %u: 0x%016lX -> 0x%016lX(%lu)", pI, i - 1, (uint64_t) cur, (uint64_t) cur + cur->Count * 4096, cur->Count);
 			else
-				DebugCon_WriteFormatted("  %u -> %u: nullptr\n", pI, i - 1);
+				LogDebugFormatted("PMM", "  %u -> %u: nullptr", pI, i - 1);
 			cur = next;
 			pI  = i;
 		}
 	}
 	if (cur)
-		DebugCon_WriteFormatted("  %u -> 254: 0x%016lX -> 0x%016lX(%lu)\n", pI, (uint64_t) cur, (uint64_t) cur + cur->Count * 4096, cur->Count);
+		LogDebugFormatted("PMM", "  %u -> 254: 0x%016lX -> 0x%016lX(%lu)", pI, (uint64_t) cur, (uint64_t) cur + cur->Count * 4096, cur->Count);
 	else
-		DebugCon_WriteFormatted("  %u -> 254: nullptr\n", pI);
+		LogDebugFormatted("PMM", "  %u -> 254: nullptr", pI);
+	LogUnlock();
 }
 
 void* PMMAlloc(size_t count)

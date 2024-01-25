@@ -476,6 +476,13 @@ size_t vfprintf(FILE* restrict stream, const char* restrict fmt, va_list vlist)
 					goto BREAKOUT;
 				break;
 			}
+			case 8:
+			{
+				const char* subFmt   = va_arg(vlist, const char*);
+				va_list*    subvlist = va_arg(vlist, va_list*);
+				len                 += vfprintf(stream, subFmt, *subvlist);
+				break;
+			}
 			}
 			break;
 		}
