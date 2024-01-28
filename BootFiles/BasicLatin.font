@@ -1,0 +1,9 @@
+fontdef size:8x16 bpp:1
+
+load Font/BasicLatin.bmp
+chardef chars:0->31    width:2       img:0,0->256,32
+chardef chars:32->126  width:1 dx:16 img:4,32->252,128
+chardef chars:127->127 width:2       img:240,112->256,128
+
+load Font/U+FFFD.bmp
+chardef chars:65533->65533 width:2 img:0,0->16,16
