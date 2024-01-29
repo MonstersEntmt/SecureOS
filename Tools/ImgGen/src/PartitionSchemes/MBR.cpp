@@ -163,6 +163,6 @@ namespace MBR
 		cylinder        >>= 8;
 		if (cylinder >= 1023)
 			return 0xFFFFFF;
-		return ((uint32_t) (cylinder & 0xFF) << 16) | (((uint32_t) cylinder & 0x300) >> 2) | ((uint16_t) sector << 8) | (uint8_t) head;
+		return ((uint32_t) (cylinder & 0xFF) << 16) | ((uint16_t) (sector | ((cylinder >> 8) & 0xC0)) << 8) | (uint8_t) head;
 	}
 } // namespace MBR

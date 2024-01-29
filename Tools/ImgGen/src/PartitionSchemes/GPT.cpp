@@ -58,10 +58,10 @@ namespace GPT
 			state = 3;
 
 			mbrHeader.Partitions[0] = {
-				.StatusAndFirstSectorCHS = 0x00010080,
-				.TypeAndLastSectorCHS    = (MBR::GetCHS(lastLBA) << 8) | 0xEE,
+				.StatusAndFirstSectorCHS = 0x00020000,
+				.TypeAndLastSectorCHS    = (MBR::GetCHS(backupLBA) << 8) | 0xEE,
 				.FirstLBA                = 1,
-				.LBACount                = (uint32_t) std::min<size_t>(lastLBA - 1, 0xFFFF'FFFF)
+				.LBACount                = (uint32_t) std::min<size_t>(backupLBA, 0xFFFF'FFFF)
 			};
 			for (size_t i = 1; i < 4; ++i)
 				mbrHeader.Partitions[i] = {};
@@ -69,13 +69,13 @@ namespace GPT
 		else
 		{
 			auto& protectivePartition = mbrHeader.Partitions[0];
-			if (protectivePartition.StatusAndFirstSectorCHS != 0x00010080)
+			if (protectivePartition.StatusAndFirstSectorCHS != 0x00020000)
 			{
 				if (options.Verbose)
 					std::cout << "ImgGen WARN: Protective MBR partition contains invalid status or first sector CHS, will fix on write\n";
-				protectivePartition.StatusAndFirstSectorCHS = 0x00010080;
+				protectivePartition.StatusAndFirstSectorCHS = 0x00020000;
 			}
-			uint32_t lastCHS = MBR::GetCHS(lastLBA);
+			uint32_t lastCHS = MBR::GetCHS(backupLBA);
 			if ((protectivePartition.TypeAndLastSectorCHS >> 8) != lastCHS)
 			{
 				if (options.Verbose)
@@ -89,11 +89,11 @@ namespace GPT
 					std::cout << "ImgGen WARN: Protective MBR partition contains invalid first LBA, will fix on write\n";
 				protectivePartition.FirstLBA = 1;
 			}
-			if (protectivePartition.LBACount != std::min<size_t>(lastLBA - 1, 0xFFFF'FFFF))
+			if (protectivePartition.LBACount != std::min<size_t>(backupLBA, 0xFFFF'FFFF))
 			{
 				if (options.Verbose)
 					std::cout << "ImgGen WARN: Protective MBR partition contains invalid LBA count, will fix on write\n";
-				protectivePartition.LBACount = std::min<size_t>(lastLBA - 1, 0xFFFF'FFFF);
+				protectivePartition.LBACount = std::min<size_t>(backupLBA, 0xFFFF'FFFF);
 			}
 			for (size_t i = 1; i < 4; ++i)
 			{
@@ -226,7 +226,7 @@ namespace GPT
 
 			header.Signature      = 0x5452415020494645ULL;
 			header.Revision       = 0x00010000;
-			header.HeaderSize     = 92;
+			header.HeaderSize     = sizeof(GPTHeader);
 			header.CurrentLBA     = 1;
 			header.BackupLBA      = backupLBA;
 			header.FirstUsableLBA = firstLBA;
