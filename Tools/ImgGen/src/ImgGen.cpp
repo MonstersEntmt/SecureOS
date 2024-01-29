@@ -5,6 +5,7 @@
 #include "PartitionTypes/FAT.hpp"
 #include "PartitionTypes/Helpers.hpp"
 #include "State.hpp"
+#include "Utils/UTF.hpp"
 
 #include <cstdint>
 #include <cstring>
@@ -39,6 +40,7 @@ int main(int argc, char** argv)
 	partitionKVState.RegisterOption({ .Name = "name", .Required = true }, { .Syntax = "<string>", .Description = "Name of partition (Max of 36 characters)" });
 	formatKVState.RegisterOption({ .Name = "partition", .Required = true }, { .Syntax = "<number>", .Description = "Partition number" });
 	formatKVState.RegisterOption({ .Name = "type", .Required = true }, { .Syntax = "<filesystem>", .Description = "Partition format" });
+	formatKVState.RegisterOption({ .Name = "force" }, { .Syntax = "[bool]", .Description = "Force reformat of partition" });
 	copyKVState.RegisterOption({ .Name = "partition", .Required = true }, { .Syntax = "<number>", .Description = "Partition number" });
 	copyKVState.RegisterOption({ .Name = "from", .Required = true }, { .Syntax = "<path>", .Description = "Host filepath to copy from" });
 	copyKVState.RegisterOption({ .Name = "to", .Required = true }, { .Syntax = "<path>", .Description = "Filepath to copy to" });
@@ -102,8 +104,9 @@ int main(int argc, char** argv)
 				return 1;
 			}
 
-			auto& partitionOption  = options.PartitionOptions[partitionNumber - 1];
-			partitionOption.Format = ParsePartitionFormat(kvOptions["type"]);
+			auto& partitionOption         = options.PartitionOptions[partitionNumber - 1];
+			partitionOption.Format        = ParsePartitionFormat(kvOptions["type"]);
+			partitionOption.ForceReformat = kvOptions["force"] ? kvOptions["force"].Value.empty() ? true : ParseBoolean(kvOptions["force"], false) : false;
 		}
 		for (auto& copyOptions : argOptions["copy"].Options)
 		{
@@ -200,15 +203,17 @@ int main(int argc, char** argv)
 			break;
 		case EPartitionFormat::FAT:
 		{
-			FAT::State state       = FAT::LoadState(options, partition, outputFile);
-			uint64_t   maxFileSize = FAT::MaxFileSize(state);
-			bool       failed      = false;
+			FAT::State* state       = FAT::LoadState(options, partition, outputFile);
+			uint64_t    maxFileSize = FAT::MaxFileSize();
+			bool        failed      = false;
 			for (auto& fileCopy : partition.Copies)
 			{
 				for (auto itr : std::filesystem::recursive_directory_iterator { fileCopy.From, std::filesystem::directory_options::skip_permission_denied | std::filesystem::directory_options::follow_directory_symlink })
 				{
 					if (!itr.is_regular_file())
 						continue;
+
+					auto writeTime = std::filesystem::last_write_time(itr.path());
 
 					std::ifstream file { itr.path(), std::ios::binary | std::ios::ate };
 					if (!file)
@@ -223,7 +228,9 @@ int main(int argc, char** argv)
 					}
 					file.seekg(0);
 
-					std::string filepath = FAT::Normalize((fileCopy.To / std::filesystem::relative(itr.path(), fileCopy.From)).string());
+					std::u32string filepath = FAT::NormalizePath(UTF::UTF8ToUTF32((fileCopy.To / std::filesystem::relative(itr.path(), fileCopy.From)).string()));
+					if (options.Verbose)
+						std::cout << "ImgGen INFO: attempting to copy file " << itr.path() << " to '" << UTF::UTF32ToUTF8(filepath) << "'\n";
 
 					FAT::FileState fileState;
 					if (FAT::Exists(state, filepath))
@@ -237,7 +244,12 @@ int main(int argc, char** argv)
 						}
 						fileState          = FAT::GetFile(state, filepath);
 						size_t currentSize = FAT::GetFileSize(fileState);
-						if (currentSize == fileSize && FAT::GetModifyTime(fileState) == std::filesystem::last_write_time(itr.path()).time_since_epoch().count())
+						if (options.Verbose)
+						{
+							std::cout << "ImgGen INFO: file " << itr.path() << " already exists, attempting to check if it's the same file, stored size '" << currentSize << "', actual size '" << fileSize << "'\n";
+							std::cout << "    Stored filetime '" << FAT::GetWriteTime(fileState).time_since_epoch() << "', actual write time '" << FAT::ToTimePoint(writeTime).time_since_epoch() << "'\n";
+						}
+						if (currentSize == fileSize && FAT::GetWriteTime(fileState) == FAT::ToTimePoint(writeTime))
 						{
 							file.close();
 							FAT::CloseFile(fileState);
@@ -248,16 +260,15 @@ int main(int argc, char** argv)
 					}
 					else
 					{
-						fileState = FAT::CreateFile(state, filepath);
+						fileState = FAT::GetFile(state, filepath, true);
 						if (options.Verbose)
 							std::cout << "ImgGen INFO: file " << itr.path() << " created\n";
 					}
 
-
 					if (options.Verbose)
 						std::cout << "ImgGen INFO: written 0/" << fileSize;
 					FAT::EnsureFileSize(fileState, fileSize);
-					FAT::SetModifyTime(fileState, std::filesystem::last_write_time(itr.path()).time_since_epoch().count());
+					FAT::SetWriteTime(fileState, FAT::ToTimePoint(writeTime));
 					for (size_t i = 0; i < fileSize / 65536; ++i)
 					{
 						file.read((char*) transferBuffer, 65536);

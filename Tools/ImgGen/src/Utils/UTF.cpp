@@ -189,6 +189,30 @@ namespace UTF
 		return true;
 	}
 
+	int8_t UTF8EncodeCodepointLength(char32_t codepoint)
+	{
+		if (codepoint >= 0x11'0000)
+			return -3;
+		else if (codepoint >= 0x1'0000)
+			return 4;
+		else if (codepoint >= 0x800)
+			return 3;
+		else if (codepoint >= 0x80)
+			return 2;
+		else
+			return 1;
+	}
+
+	int8_t UTF16EncodeCodepointLength(char32_t codepoint)
+	{
+		if ((codepoint >= 0xD800 && codepoint <= 0xDFFF) || codepoint >= 0x11'0000)
+			return -1;
+		else if (codepoint >= 0x1'0000)
+			return 2;
+		else
+			return 1;
+	}
+
 	std::u16string UTF8ToUTF16(std::string_view utf8)
 	{
 		std::u16string utf16;
@@ -203,12 +227,12 @@ namespace UTF
 				if (!isInvalid)
 					utf16.push_back(0xFFFD);
 				isInvalid = true;
-				utf8.substr(-result);
+				utf8      = utf8.substr(-result);
 				continue;
 			}
 
 			isInvalid = codepoint == 0xFFFD;
-			utf8.substr(result);
+			utf8      = utf8.substr(result);
 			isInvalid = !UTF16EncodeCodepoint(utf16, codepoint);
 		}
 		return utf16;
@@ -228,12 +252,12 @@ namespace UTF
 				if (!isInvalid)
 					utf32.push_back(0xFFFD);
 				isInvalid = true;
-				utf8.substr(-result);
+				utf8      = utf8.substr(-result);
 				continue;
 			}
 
 			isInvalid = codepoint == 0xFFFD;
-			utf8.substr(result);
+			utf8      = utf8.substr(result);
 			if ((codepoint >= 0xD800 && codepoint <= 0xDFFF) || codepoint >= 0x11'0000)
 			{
 				utf32.push_back(0xFFFD);
@@ -266,12 +290,12 @@ namespace UTF
 					utf8.push_back(0b10111101);
 				}
 				isInvalid = true;
-				utf16.substr(-result);
+				utf16     = utf16.substr(-result);
 				continue;
 			}
 
 			isInvalid = codepoint == 0xFFFD;
-			utf16.substr(result);
+			utf16     = utf16.substr(result);
 			isInvalid = !UTF8EncodeCodepoint(utf8, codepoint);
 		}
 		return utf8;
@@ -291,12 +315,12 @@ namespace UTF
 				if (!isInvalid)
 					utf32.push_back(0xFFFD);
 				isInvalid = true;
-				utf16.substr(-result);
+				utf16     = utf16.substr(-result);
 				continue;
 			}
 
 			isInvalid = codepoint == 0xFFFD;
-			utf16.substr(result);
+			utf16     = utf16.substr(result);
 			if (codepoint >= 0x11'0000)
 			{
 				utf32.push_back(0xFFFD);
@@ -326,6 +350,124 @@ namespace UTF
 		for (size_t i = 0; i < utf32.size(); ++i)
 			UTF16EncodeCodepoint(utf16, utf32[i]);
 		return utf16;
+	}
+
+	size_t UTF8ToUTF16Length(std::string_view utf8)
+	{
+		size_t length    = 0;
+		bool   isInvalid = false;
+		while (!utf8.empty())
+		{
+			char32_t codepoint = 0xFFFD;
+			int8_t   result    = UTF8DecodeCodepoint(utf8, codepoint);
+			if (result < 0)
+			{
+				if (!isInvalid)
+					++length;
+				isInvalid = true;
+				utf8      = utf8.substr(-result);
+				continue;
+			}
+
+			isInvalid    = codepoint == 0xFFFD;
+			utf8         = utf8.substr(result);
+			int8_t delta = UTF16EncodeCodepointLength(codepoint);
+			isInvalid    = delta < 0;
+			length      += delta < 0 ? -delta : delta;
+		}
+		return length;
+	}
+
+	size_t UTF8ToUTF32Length(std::string_view utf8)
+	{
+		size_t length    = 0;
+		bool   isInvalid = false;
+		while (!utf8.empty())
+		{
+			char32_t codepoint = 0xFFFD;
+			int8_t   result    = UTF8DecodeCodepoint(utf8, codepoint);
+			if (result < 0)
+			{
+				if (!isInvalid)
+					++length;
+				isInvalid = true;
+				utf8      = utf8.substr(-result);
+				continue;
+			}
+
+			isInvalid = codepoint == 0xFFFD;
+			utf8      = utf8.substr(result);
+			isInvalid = (codepoint >= 0xD800 && codepoint <= 0xDFFF) || codepoint >= 0x11'0000;
+			++length;
+		}
+		return length;
+	}
+
+	size_t UTF16ToUTF8Length(std::u16string_view utf16)
+	{
+		size_t length    = 0;
+		bool   isInvalid = false;
+		while (!utf16.empty())
+		{
+			char32_t codepoint = 0xFFFD;
+			int8_t   result    = UTF16DecodeCodepoint(utf16, codepoint);
+			if (result < 0)
+			{
+				if (!isInvalid)
+					length += 3;
+				isInvalid = true;
+				utf16     = utf16.substr(-result);
+				continue;
+			}
+
+			isInvalid    = codepoint == 0xFFFD;
+			utf16        = utf16.substr(result);
+			int8_t delta = UTF8EncodeCodepointLength(codepoint);
+			isInvalid    = delta < 0;
+			length      += delta < 0 ? -delta : delta;
+		}
+		return length;
+	}
+
+	size_t UTF16ToUTF32Length(std::u16string_view utf16)
+	{
+		size_t length    = 0;
+		bool   isInvalid = false;
+		while (!utf16.empty())
+		{
+			char32_t codepoint = 0xFFFD;
+			int8_t   result    = UTF16DecodeCodepoint(utf16, codepoint);
+			if (result < 0)
+			{
+				if (!isInvalid)
+					++length;
+				isInvalid = true;
+				utf16     = utf16.substr(-result);
+				continue;
+			}
+
+			isInvalid = codepoint == 0xFFFD;
+			utf16     = utf16.substr(result);
+			isInvalid = codepoint >= 0x11'0000;
+			++length;
+		}
+		return length;
+	}
+
+	size_t UTF32ToUTF8Length(std::u32string_view utf32)
+	{
+		size_t length = 0;
+		for (size_t i = 0; i < utf32.size(); ++i)
+			length += abs(UTF8EncodeCodepointLength(utf32[i]));
+		return length;
+	}
+
+	size_t UTF32ToUTF16Length(std::u32string_view utf32)
+	{
+		size_t length = 0;
+		for (size_t i = 0; i < utf32.size(); ++i)
+			length += abs(UTF16EncodeCodepointLength(utf32[i]));
+		return length;
 	}
 
 	char32_t UTF32ToLower(char32_t codepoint)
