@@ -1,4 +1,4 @@
-KERNEL_LIBC_C_SRCS   := $(shell find KernelLibC/src/ -name '*.c' -o -path '*/arches' -prune -a -not -path '*/arches')
+KERNEL_LIBC_C_SRCS   := $(shell find KernelLibC/src/ -name '*.c' -o -path '*/Arches' -prune -a -not -path '*/Arches')
 KERNEL_LIBC_ASM_SRCS :=
 
 KERNEL_LIBC_CFLAGS   := -std=c23 -fno-builtin -nostdinc -nostdlib -IKernelLibC/inc
@@ -10,7 +10,7 @@ include KernelLibC/Arches/$(ARCH).mk
 KERNEL_LIBC_C_OBJS   := $(KERNEL_LIBC_C_SRCS:%=Bin-Int/$(CONFIG)/%.o)
 KERNEL_LIBC_ASM_OBJS := $(KERNEL_LIBC_ASM_SRCS:%=Bin-Int/$(CONFIG)/%.o)
 
-KERNEL_LIBC_OBJS := KERNEL_C_OBJS KERNEL_ASM_OBJS
+KERNEL_LIBC_OBJS := $(KERNEL_LIBC_C_OBJS) $(KERNEL_LIBC_ASM_OBJS)
 
 ifeq ($(CONFIG), debug)
 KERNEL_LIBC_CFLAGS += -O0 -g -DBUILD_CONFIG=BUILD_CONFIG_DEBUG

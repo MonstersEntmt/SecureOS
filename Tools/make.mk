@@ -4,6 +4,7 @@ include Tools/LA/make.mk
 include Tools/LC/make.mk
 include Tools/LL/make.mk
 
+.PHONY: Tools
 Tools: Tools/FontGen Tools/ImgGen Tools/LA Tools/LC Tools/LL
 
 FONTGEN := Bin/$(CONFIG)/Tools/FontGen

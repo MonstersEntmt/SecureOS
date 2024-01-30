@@ -1,4 +1,4 @@
-KERNEL_C_SRCS   := $(shell find Kernel/src/ -name '*.c' -o -path '*/arches' -prune -a -not -path '*/arches')
+KERNEL_C_SRCS   := $(shell find Kernel/src/ -name '*.c' -o -path '*/Arches' -prune -a -not -path '*/Arches')
 KERNEL_ASM_SRCS :=
 
 KERNEL_CFLAGS   := -std=c23 -fno-builtin -nostdinc -nostdlib -isystem KernelLibC/inc -IKernel/inc
@@ -7,12 +7,10 @@ KERNEL_LDFLAGS  := -e kernel_entry
 
 include Kernel/Arches/$(ARCH).mk
 
-include KernelLibC/make.mk
-
 KERNEL_C_OBJS   := $(KERNEL_C_SRCS:%=Bin-Int/$(CONFIG)/%.o)
 KERNEL_ASM_OBJS := $(KERNEL_ASM_SRCS:%=Bin-Int/$(CONFIG)/%.o)
 
-KERNEL_OBJS := KERNEL_LIBC_OBJS KERNEL_C_OBJS KERNEL_ASM_OBJS
+KERNEL_OBJS := $(KERNEL_LIBC_OBJS) $(KERNEL_C_OBJS) $(KERNEL_ASM_OBJS)
 
 ifeq ($(CONFIG), debug)
 KERNEL_CFLAGS += -O0 -g -DBUILD_CONFIG=BUILD_CONFIG_DEBUG
@@ -40,4 +38,5 @@ Bin/$(CONFIG)/UEFI/secure-os/kernel.elf: $(KERNEL_OBJS)
 	$(LD) $(KERNEL_LDFLAGS) -o $@ $(KERNEL_OBJS)
 	echo Linked Kernel
 
+.PHONY: Kernel
 Kernel: Bin/$(CONFIG)/UEFI/secure-os/kernel.elf
