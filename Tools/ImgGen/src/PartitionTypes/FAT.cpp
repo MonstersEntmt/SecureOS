@@ -148,7 +148,7 @@ namespace FAT
 		return needsLongName;
 	}
 
-	void DirectoryState::FillFilename(std::u32string& filename, const char (&shortName)[11], bool lowercaseFilename, bool lowercaseExtension)
+	void DirectoryState::FillFilename(std::u32string& filename, const char (&shortName)[11], uint8_t attribute, bool lowercaseFilename, bool lowercaseExtension)
 	{
 		if (memcmp(shortName, ".          ", 11) == 0)
 		{
@@ -158,6 +158,27 @@ namespace FAT
 		else if (memcmp(shortName, "..         ", 11) == 0)
 		{
 			filename = U"..";
+			return;
+		}
+
+		if (attribute == ATTR_DIRECTORY)
+		{
+			size_t nameEnd = 8;
+			for (; nameEnd-- > 0 && shortName[nameEnd] == ' ';);
+			++nameEnd;
+			filename.resize(nameEnd);
+			for (size_t i = 0; i < nameEnd; ++i)
+				filename[i] = (char32_t) (lowercaseFilename ? std::tolower(shortName[i]) : shortName[i]);
+			return;
+		}
+		else if (attribute == ATTR_VOLUME_ID)
+		{
+			size_t nameEnd = 11;
+			for (; nameEnd-- > 0 && shortName[nameEnd] == ' ';);
+			++nameEnd;
+			filename.resize(nameEnd);
+			for (size_t i = 0; i < nameEnd; ++i)
+				filename[i] = (char32_t) (lowercaseFilename ? std::tolower(shortName[i]) : shortName[i]);
 			return;
 		}
 
@@ -390,13 +411,13 @@ namespace FAT
 					}
 				}
 				if (invalid)
-					FillFilename(parsedEntry.Filename, parsedEntry.ShortName, entry.NTRes & NTLN_NAME, entry.NTRes & NTLN_EXT);
+					FillFilename(parsedEntry.Filename, parsedEntry.ShortName, parsedEntry.Attribute, entry.NTRes & NTLN_NAME, entry.NTRes & NTLN_EXT);
 				else
 					parsedEntry.Filename = UTF::UTF16ToUTF32(utf16FilenameBuf);
 			}
 			else
 			{
-				FillFilename(parsedEntry.Filename, parsedEntry.ShortName, entry.NTRes & NTLN_NAME, entry.NTRes & NTLN_EXT);
+				FillFilename(parsedEntry.Filename, parsedEntry.ShortName, parsedEntry.Attribute, entry.NTRes & NTLN_NAME, entry.NTRes & NTLN_EXT);
 			}
 			if (State->Options->Verbose)
 				std::cout << "ImgGen INFO: entry was given filename '" << UTF::UTF32ToUTF8(parsedEntry.Filename) << "'\n";
@@ -1709,7 +1730,7 @@ namespace FAT
 
 		uint32_t bytesPerCluster = 512 * fileState.State->ClusterSize;
 
-		uint32_t initialBytes = std::min<uint32_t>(512 - (fileState.WriteOffset % bytesPerCluster), size);
+		uint32_t initialBytes = std::min<uint32_t>(bytesPerCluster - (fileState.WriteOffset % bytesPerCluster), size);
 		uint32_t offset       = 0;
 		uint8_t* temp         = nullptr;
 		if (initialBytes > 0)
@@ -1728,7 +1749,11 @@ namespace FAT
 		if (!size)
 		{
 			if (fileState.WriteOffset > fileState.Entry->FileSize)
+			{
 				fileState.Entry->FileSize = fileState.WriteOffset;
+				if (fileState.State->Options->Verbose)
+					std::cout << "ImgGen INFO: File '" << UTF::UTF32ToUTF8(fileState.Directory->Path) << UTF::UTF32ToUTF8(fileState.Entry->Filename) << "' resized to '" << fileState.Entry->FileSize << "'\n";
+			}
 			delete[] temp;
 			return offset;
 		}
@@ -1739,11 +1764,16 @@ namespace FAT
 		{
 			fileState.WriteCluster = fileState.State->WriteCluster((const uint8_t*) buffer + offset, fileState.WriteCluster, i < clusterCount - 1);
 			offset                += bytesPerCluster;
+			fileState.WriteOffset += bytesPerCluster;
 		}
 		if (!fileState.WriteCluster)
 		{
 			if (fileState.WriteOffset > fileState.Entry->FileSize)
+			{
 				fileState.Entry->FileSize = fileState.WriteOffset;
+				if (fileState.State->Options->Verbose)
+					std::cout << "ImgGen INFO: File '" << UTF::UTF32ToUTF8(fileState.Directory->Path) << UTF::UTF32ToUTF8(fileState.Entry->Filename) << "' resized to '" << fileState.Entry->FileSize << "'\n";
+			}
 			delete[] temp;
 			return offset;
 		}
@@ -1758,7 +1788,11 @@ namespace FAT
 			fileState.WriteOffset += remainder;
 		}
 		if (fileState.WriteOffset > fileState.Entry->FileSize)
+		{
 			fileState.Entry->FileSize = fileState.WriteOffset;
+			if (fileState.State->Options->Verbose)
+				std::cout << "ImgGen INFO: File '" << UTF::UTF32ToUTF8(fileState.Directory->Path) << UTF::UTF32ToUTF8(fileState.Entry->Filename) << "' resized to '" << fileState.Entry->FileSize << "'\n";
+		}
 		delete[] temp;
 		return offset;
 	}

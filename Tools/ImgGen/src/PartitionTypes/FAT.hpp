@@ -197,7 +197,7 @@ namespace FAT
 	public:
 		static bool    CompareFilenames(std::u32string_view lhs, std::u32string_view rhs);
 		static bool    FillShortName(std::u32string_view filename, char (&shortName)[11], bool& lowercaseFilename, bool& lowercaseExtension);
-		static void    FillFilename(std::u32string& filename, const char (&shortName)[11], bool lowercaseFilename, bool lowercaseExtension);
+		static void    FillFilename(std::u32string& filename, const char (&shortName)[11], uint8_t attribute, bool lowercaseFilename, bool lowercaseExtension);
 		static uint8_t ShortNameChecksum(char (&shortName)[11]);
 
 	public:
