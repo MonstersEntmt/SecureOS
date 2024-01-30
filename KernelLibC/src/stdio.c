@@ -1183,7 +1183,7 @@ ssize_t vfprintf(FILE* restrict stream, const char* restrict fmt, va_list vlist)
 				buf[--start] = uppercase ? s_HexUppercase[rem] : s_HexLowercase[rem];
 			}
 
-			size_t fieldLen     = 22 - start;
+			size_t fieldLen     = 16 - start;
 			size_t zeroPadCount = 0;
 			if (options.Precision >= 0)
 			{

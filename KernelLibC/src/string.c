@@ -233,6 +233,8 @@ char* strstr(const char* str, const char* substr)
 	return cur;
 }
 
+// TODO(MarcasRealAccount): Improve memchr functions
+
 void* memchr(const void* ptr, int ch, size_t count)
 {
 	const uint8_t* pU = (const uint8_t*) ptr;
