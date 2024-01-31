@@ -3,7 +3,7 @@ KERNEL_ASM_SRCS :=
 
 KERNEL_CFLAGS   := -std=c23 -fno-builtin -nostdinc -nostdlib -isystem KernelLibC/inc -IKernel/inc
 KERNEL_ASMFLAGS :=
-KERNEL_LDFLAGS  := -e kernel_entry
+KERNEL_LDFLAGS  := -e UltraEntry
 
 include Kernel/Arches/$(ARCH).mk
 

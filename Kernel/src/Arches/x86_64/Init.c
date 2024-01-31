@@ -1,7 +1,7 @@
-#include "Init.h"
 #include "Arches/x86_64/GDT.h"
 #include "Arches/x86_64/IDT.h"
 #include "Arches/x86_64/InterruptHandlers.h"
+#include "Entry.h"
 #include "Panic.h"
 #include <stdio.h>
 
@@ -32,4 +32,6 @@ void KernelArchPreInit(void)
 
 void KernelArchPostInit(void)
 {
+	puts("INFO: x86-64 post init started");
+	puts("INFO: x86-64 post init done");
 }
