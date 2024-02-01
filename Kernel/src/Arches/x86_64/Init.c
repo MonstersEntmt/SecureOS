@@ -1,3 +1,4 @@
+#include "Arches/x86_64/Features.h"
 #include "Arches/x86_64/GDT.h"
 #include "Arches/x86_64/IDT.h"
 #include "Arches/x86_64/InterruptHandlers.h"
@@ -9,6 +10,8 @@ void KernelArchPreInit(void)
 {
 	puts("INFO: x86-64 pre init started");
 	CPUDisableInterrupts();
+
+	KernelArchDetectAndEnableFeatures();
 
 	GDTSetNullDescriptor(0);
 	GDTSetCodeDescriptor(8, 0, false);

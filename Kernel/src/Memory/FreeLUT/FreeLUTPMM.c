@@ -1,6 +1,8 @@
 #include "Memory/FreeLUT/FreeLUTPMM.h"
+#include "Memory/FreeLUT/FreeLUT.h"
 #include "Memory/PMM.h"
 #include "Panic.h"
+
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -26,28 +28,12 @@ struct FreeLUTState
 
 struct FreeLUTState* g_FreeLUT;
 
-// Returns the smallest value for a specific LUT index
-static uint64_t FreeLUTGetLUTValue(uint8_t index)
+static void FreeLUTLock(void)
 {
-	if (index < 192)
-		return (uint64_t) index + 1;
-	return (1UL << (index - 191)) + 192;
 }
 
-// Returns the index in the LUT where to push the value in
-static uint8_t FreeLUTGetLUTFloorIndex(uint64_t value)
+static void FreeLUTUnlock(void)
 {
-	if (value < 193)
-		return (uint8_t) value - 1;
-	return (254 - __builtin_clzll(value - 192));
-}
-
-// Returns the index in the LUT where the value is at least what's requested
-static uint8_t FreeLUTGetLUTCeilIndex(uint64_t value)
-{
-	if (value < 193)
-		return (uint8_t) value - 1;
-	return (255 - __builtin_clzll(value - 193));
 }
 
 static bool FreeLUTBitmapGetEntry(uintptr_t page)
@@ -128,7 +114,8 @@ static struct FreeLUTPageHeader* FreeLUTGetFirstPage(struct FreeLUTPageHeader* h
 
 static void FreeLUTInsertFreePage(struct FreeLUTPageHeader* header)
 {
-	uint8_t index = FreeLUTGetLUTFloorIndex(header->Count);
+	uint8_t index = FreeLUTGetFloorIndex(header->Count);
+	FreeLUTLock();
 	if (g_FreeLUT->LUT[index])
 	{
 		struct FreeLUTPageHeader* other = g_FreeLUT->LUT[index];
@@ -143,6 +130,7 @@ static void FreeLUTInsertFreePage(struct FreeLUTPageHeader* header)
 				break;
 			g_FreeLUT->LUT[i] = header;
 		}
+		FreeLUTUnlock();
 		return;
 	}
 
@@ -157,13 +145,15 @@ static void FreeLUTInsertFreePage(struct FreeLUTPageHeader* header)
 	header->Prev    = g_FreeLUT->Last;
 	header->Next    = nullptr;
 	g_FreeLUT->Last = header;
+	FreeLUTUnlock();
 }
 
 static void FreeLUTEraseFreeRange(struct FreeLUTPageHeader* header)
 {
+	uint8_t index = FreeLUTGetFloorIndex(header->Count);
+	FreeLUTLock();
 	if (g_FreeLUT->Last == header)
 		g_FreeLUT->Last = header->Prev;
-	uint8_t index = FreeLUTGetLUTFloorIndex(header->Count);
 	for (uint8_t i = index + 1; i-- > 0;)
 	{
 		if (g_FreeLUT->LUT[i] != header)
@@ -177,42 +167,54 @@ static void FreeLUTEraseFreeRange(struct FreeLUTPageHeader* header)
 		header->Next->Prev = header->Prev;
 	header->Prev = nullptr;
 	header->Next = nullptr;
+	FreeLUTUnlock();
 }
 
 static struct FreeLUTPageHeader* FreeLUTTakeFreeRange(size_t count)
 {
+	FreeLUTLock();
 	if (count == 1)
 	{
 		struct FreeLUTPageHeader* header = g_FreeLUT->LUT[0];
 		if (header)
 			FreeLUTEraseFreeRange(header);
+		FreeLUTUnlock();
 		return header;
 	}
 
-	uint8_t index = FreeLUTGetLUTCeilIndex(count);
+	uint8_t index = FreeLUTGetCeilIndex(count);
 	if (g_FreeLUT->LUT[index])
 	{
 		struct FreeLUTPageHeader* header = g_FreeLUT->LUT[index];
 		FreeLUTEraseFreeRange(header);
+		FreeLUTUnlock();
 		return header;
 	}
 
 	if (index == 0 ||
-		FreeLUTGetLUTValue(index) == count)
+		FreeLUTGetValue(index) == count)
+	{
+		FreeLUTUnlock();
 		return nullptr;
+	}
 
 	struct FreeLUTPageHeader* cur = g_FreeLUT->LUT[index - 1];
 	while (cur && cur != g_FreeLUT->LUT[index] && cur->Count < count)
 		cur = cur->Next;
 	if (!cur && cur == g_FreeLUT->LUT[index])
+	{
+		FreeLUTUnlock();
 		return nullptr;
+	}
 	FreeLUTEraseFreeRange(cur);
+	FreeLUTUnlock();
 	return cur;
 }
 
 static struct FreeLUTPageHeader* FreeLUTTakeFreeRangeBelow(size_t count, void* largestAddress)
 {
 	largestAddress = (void*) ((uintptr_t) largestAddress - (count << 12));
+	FreeLUTLock();
 	if (count == 1)
 	{
 		struct FreeLUTPageHeader* header = g_FreeLUT->LUT[0];
@@ -220,36 +222,46 @@ static struct FreeLUTPageHeader* FreeLUTTakeFreeRangeBelow(size_t count, void* l
 			header = header->Next;
 		if (header)
 			FreeLUTEraseFreeRange(header);
+		FreeLUTUnlock();
 		return header;
 	}
 
-	uint8_t index = FreeLUTGetLUTCeilIndex(count);
+	uint8_t index = FreeLUTGetCeilIndex(count);
 	if (g_FreeLUT->LUT[index])
 	{
 		struct FreeLUTPageHeader* header = g_FreeLUT->LUT[index];
 		while (header && (uintptr_t) header >= (uintptr_t) largestAddress)
 			header = header->Next;
 		FreeLUTEraseFreeRange(header);
+		FreeLUTUnlock();
 		return header;
 	}
 
 	if (index == 0 ||
-		FreeLUTGetLUTValue(index) == count)
+		FreeLUTGetValue(index) == count)
+	{
+		FreeLUTUnlock();
 		return nullptr;
+	}
 
 	struct FreeLUTPageHeader* cur = g_FreeLUT->LUT[index - 1];
 	while (cur && cur != g_FreeLUT->LUT[index] && cur->Count < count && (uintptr_t) cur >= (uintptr_t) largestAddress)
 		cur = cur->Next;
 	if (!cur && cur == g_FreeLUT->LUT[index])
+	{
+		FreeLUTUnlock();
 		return nullptr;
+	}
 	FreeLUTEraseFreeRange(cur);
+	FreeLUTUnlock();
 	return cur;
 }
 
 static struct FreeLUTPageHeader* FreeLUTTakeFreeRangeAligned(uintptr_t count, uint8_t alignment)
 {
-	uint8_t                   index = FreeLUTGetLUTFloorIndex(count);
-	struct FreeLUTPageHeader* cur   = g_FreeLUT->LUT[index];
+	uint8_t index = FreeLUTGetFloorIndex(count);
+	FreeLUTLock();
+	struct FreeLUTPageHeader* cur = g_FreeLUT->LUT[index];
 
 	const uintptr_t alignmentVal  = 1UL << alignment;
 	const uintptr_t alignmentMask = alignmentVal - 1;
@@ -258,13 +270,15 @@ static struct FreeLUTPageHeader* FreeLUTTakeFreeRangeAligned(uintptr_t count, ui
 		cur = cur->Next;
 	if (cur)
 		FreeLUTEraseFreeRange(cur);
+	FreeLUTUnlock();
 	return cur;
 }
 
 static struct FreeLUTPageHeader* FreeLUTTakeFreeRangeAlignedBelow(uintptr_t count, uint8_t alignment, void* largestAddress)
 {
-	largestAddress                  = (void*) ((uintptr_t) largestAddress - (count << 12));
-	uint8_t                   index = FreeLUTGetLUTFloorIndex(count);
+	largestAddress = (void*) ((uintptr_t) largestAddress - (count << 12));
+	FreeLUTLock();
+	uint8_t                   index = FreeLUTGetFloorIndex(count);
 	struct FreeLUTPageHeader* cur   = g_FreeLUT->LUT[index];
 
 	const uintptr_t alignmentVal  = 1UL << alignment;
@@ -274,6 +288,7 @@ static struct FreeLUTPageHeader* FreeLUTTakeFreeRangeAlignedBelow(uintptr_t coun
 		cur = cur->Next;
 	if (cur)
 		FreeLUTEraseFreeRange(cur);
+	FreeLUTUnlock();
 	return cur;
 }
 
@@ -314,7 +329,7 @@ void FreeLUTPMMInit(size_t entryCount, PMMGetMemoryMapEntryFn getter, void* user
 	}
 	if (pmmAllocatedIn >= entryCount)
 	{
-		printf("FreeLUTPMM CRITICAL: Could not allocate PMM requiring %zu pages\n", pmmRequiredSize >> 12);
+		printf("FreeLUT CRITICAL: Could not allocate PMM requiring %zu pages\n", pmmRequiredSize >> 12);
 		KernelPanic();
 	}
 
@@ -441,9 +456,9 @@ void FreeLUTPMMGetMemoryStats(struct PMMMemoryStats* stats)
 	if (!stats)
 		return;
 
-	// TODO(MarcasRealAccount): FreeLUTLock();
+	FreeLUTLock();
 	*stats = g_FreeLUT->Stats;
-	// TODO(MarcasRealAccount): FreeLUTUnlock();
+	FreeLUTUnlock();
 }
 
 size_t FreeLUTPMMGetMemoryMap(const struct PMMMemoryMapEntry** entries)
@@ -451,10 +466,10 @@ size_t FreeLUTPMMGetMemoryMap(const struct PMMMemoryMapEntry** entries)
 	if (!entries)
 		return 0;
 
-	// TODO(MarcasRealAccount): FreeLUTLock();
+	FreeLUTLock();
 	*entries     = g_FreeLUT->MemoryMap;
 	size_t count = g_FreeLUT->MemoryMapCount;
-	// TODO(MarcasRealAccount): FreeLUTUnlock();
+	FreeLUTUnlock();
 	return count;
 }
 

@@ -4,6 +4,7 @@
 #include "Entry.h"
 #include "IO/Debug.h"
 #include "Memory/PMM.h"
+#include "Memory/VMM.h"
 #include "Panic.h"
 #include "Ultra/UltraProtocol.h"
 #include <stdio.h>
@@ -17,6 +18,16 @@ static const char s_PMMStatsMsg[] = "INFO: %s PMM Statistics\n"
 									"      Pages Free            %zu\n"
 									"      Alloc Calls           %zu\n"
 									"      Free Calls            %zu\n";
+static const char s_VMMStatsMsg[] = "INFO: %s VMM Statistics\n"
+									"      Address              %p\n"
+									"      Footprint            %zu\n"
+									"      Pages Allocated      %zu\n"
+									"      Pages Mapped         %zu\n"
+									"      Pages Mapped to Disk %zu\n"
+									"      Alloc Calls          %zu\n"
+									"      Free Calls           %zu\n"
+									"      Protect Calls        %zu\n"
+									"      Map Calls            %zu\n";
 
 void UltraEntry(struct ultra_boot_context* bootContext, uint32_t magic)
 {
@@ -52,6 +63,22 @@ void UltraEntry(struct ultra_boot_context* bootContext, uint32_t magic)
 			   stats.PagesFree,
 			   stats.AllocCalls,
 			   stats.FreeCalls);
+	}
+
+	{
+		struct VMMMemoryStats stats;
+		VMMGetMemoryStats(KernelGetVMM(), &stats);
+		printf(s_VMMStatsMsg,
+			   VMMGetSelectedName(),
+			   KernelGetVMM(),
+			   stats.Footprint,
+			   stats.PagesAllocated,
+			   stats.PagesMapped,
+			   stats.PagesMappedToDisk,
+			   stats.AllocCalls,
+			   stats.FreeCalls,
+			   stats.ProtectCalls,
+			   stats.MapCalls);
 	}
 
 	KernelArchPostInit();
@@ -131,6 +158,6 @@ void UltraHandleAttribs(struct ultra_attribute_header* attributes, uint32_t attr
 
 	KernelSelectAllocatorsFromCommandLine(commandLine->text);
 	PMMInit(ULTRA_MEMORY_MAP_ENTRY_COUNT(memoryMap->header), UltraProtocolMemoryMapConverter, memoryMap);
-
+	KernelSetupVMM();
 	ACPISetRSDPAddress((void*) (uintptr_t) platformInfo->acpi_rsdp_address);
 }
