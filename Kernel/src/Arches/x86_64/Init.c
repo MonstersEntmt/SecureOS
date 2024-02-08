@@ -11,8 +11,6 @@ void KernelArchPreInit(void)
 	puts("INFO: x86-64 pre init started");
 	CPUDisableInterrupts();
 
-	KernelArchDetectAndEnableFeatures();
-
 	GDTSetNullDescriptor(0);
 	GDTSetCodeDescriptor(8, 0, false);
 	GDTSetDataDescriptor(16);
@@ -28,8 +26,10 @@ void KernelArchPreInit(void)
 	GDTLoad(8, 16);
 	LDTLoad(0);
 	IDTLoad();
-
+	
 	CPUEnableInterrupts();
+
+	KernelArchDetectAndEnableFeatures();
 	puts("INFO: x86-64 pre init done");
 }
 
