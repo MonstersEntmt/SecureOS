@@ -4,14 +4,6 @@
 
 ---
 ### x86-64 (AMD64)
-- Detect and enable Features
-```
-    1. Force enable NXE bit in EFER
-    2. Force enable SSE and detect SSE extensions
-    3. Detect AVX2
-    4. Detect AVX512
-```
-
 - Setup GDT in format
 ```
     00: Null descriptor
@@ -31,6 +23,13 @@
 ```
 
 - Load GDT (cs 08, ds 10), LDT 00 and IDT
+
+- Detect and enable Features
+```
+    1. Force enable NXE bit in EFER
+    2. Force enable SSE and detect SSE extensions
+    3. Detect AVX extensions
+```
 ---
 
 ## Init
