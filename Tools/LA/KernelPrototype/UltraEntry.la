@@ -1,0 +1,364 @@
+.arch lasm
+
+import "IO/Debug.la"
+import "Memory/PMM.la"
+import "Memory/VMM.la"
+import "Panic.la"
+import "Entry.la"
+
+c_UltraMagic -> const u32 = 0x554C'5442
+
+BootContextIncorrectStr -> const char* = "CRITICAL: Ultra BootContext is nullptr"
+MagicIncorrectFmt       -> const char* = "CRITICAL: Ultra Magic %08X is not %08X\n"
+UltraAttribErrorFmt     -> const char* = """
+CRITICAL: Ultra attribute(s) missing
+          Platform Info %p
+          Memory Map %p
+          Command Line %p
+          Framebuffer %p\n
+"""
+PMMStatFmt              -> const char* = """
+INFO: %s PMM Statistics
+      Address:               %p
+      Footprint:             %zu
+      Last Usable Address:   %p
+      Last Physical Address: %p
+      Pages Taken:           %zu
+      Pages Free:            %zu
+      Alloc Calls:           %zu
+      Free Calls:            %zu\n
+"""
+VMMStatFmt              -> const char* = """
+INFO: %s VMM Statistics
+      Address:         %p
+      Footprint:       %zu
+      Pages Allocated: %zu
+      Pages Mapped:    %zu
+      Pages Committed: %zu
+      Pages Paged Out: %zu
+      Alloc Calls:     %zu
+      Free Calls:      %zu
+      Protect Calls:   %zu
+      Map Calls:       %zu
+      Paged Out Calls: %zu\n
+"""
+
+global UltraEntryStub() -> void:
+{
+    local bootContext -> struct UltraBootContext*
+    local magic       -> u32
+    
+    // On x86-64 we assume a SystemV AMD64 calling convention
+    intrin x86_64 popreg bootContext, rdi
+    intrin x86_64 popreg magic,       esi
+
+    push bootContext
+    push magic
+    call UltraEntry
+}
+
+UltraEntry(struct UltraBootContext* bootContext, u32 magic) -> void:
+{
+    // TODO(MarcasRealAccount): Check if we're in a debug build.
+    call DebugSetupRedirects
+
+    push bootContext
+    push 0
+    sub
+    jz .BootContextIncorrect
+
+    push magic
+    push c_UltraMagic
+    sub
+    jz .MagicIncorrect
+
+    call KernelArchPreInit
+
+    push bootContext->Attributes
+    push bootContext->AttributeCount
+    call UltraHandleAttribs
+
+    {
+        local stats   -> struct PMMMemoryStats
+        local pmmImpl -> const char*
+        
+        push stats
+        call PMMGetMemoryStats
+
+        call PMMGetSelectedName
+        pop pmmImpl
+
+        push PMMStatFmt
+        push pmmImpl
+        push stats.Address
+        push stats.Footprint
+        push stats.LastUsableAddress
+        push stats.LastPhysicalAddress
+        push stats.PagesTaken
+        push stats.PagesFree
+        push stats.AllocCalls
+        push stats.FreeCalls
+        call printf
+    }
+    {
+        local stats     -> struct VMMMemoryStats
+        local kernelVMM -> void*
+
+        call KernelGetVMM
+        pop kernelVMM
+
+        push stats
+        call VMMGetMemoryStats
+
+        push VMMStatFmt
+        push kernelVMM
+        push stats.Footprint
+        push stats.PagesAllocated
+        push stats.PagesMapped
+        push stats.PagesCommitted
+        push stats.PagesPagedOut
+        push stats.AllocCalls
+        push stats.FreeCalls
+        push stats.ProtectCalls
+        push stats.MapCalls
+        push stats.PagedOutCalls
+        call printf
+    }
+
+    call KernelArchPostInit
+
+    call KernelEntry
+    ret
+    
+    .BootContextIncorrect:
+    {
+        push BootContextIncorrectStr
+        call puts
+        call KernelPanic
+        ret
+    }
+    .MagicIncorrect:
+    {
+        push MagicIncorrectFmt
+        push magic
+        push c_UltraMagic
+        call printf
+        call KernelPanic
+        ret
+    }
+}
+
+UltraHandleAttribs(struct UltraAttributeHeader* attributes, u32 attributeCount) -> void:
+{
+    local platformInfo -> struct UltraPlatformInfoAttribute* = nullptr
+    local memoryMap    -> struct UltraMemoryMapAttribute*    = nullptr
+    local commandLine  -> struct UltraCommandLineAttribute*  = nullptr
+    local framebuffer  -> struct UltraFramebufferAttribute*  = nullptr
+
+    {
+        local curAttribute -> struct UltraAttributeHeader* = attributes
+        local i            -> u32                          = 0
+        
+        .loop:
+        {
+            push i
+            push attributeCount
+            sub
+            jmpoutzg
+
+            push curAttribute->Type
+            switch .AttribTable
+
+            .AttribTable(u32 type):
+            {
+                jmpout
+
+                .ULTRA_ATTRIBUTE_PLATFORM_INFO:
+                {
+                    push platformInfo
+                    push 0
+                    sub
+                    jmpoutnz .AttribTable
+
+                    push curAttribute
+                    pop platformInfo
+                    jmpout .AttribTable
+                }
+                .ULTRA_ATTRIBUTE_MEMORY_MAP:
+                {
+                    push memoryMap
+                    push 0
+                    sub
+                    jmpoutnz .AttribTable
+
+                    push curAttribute
+                    pop memoryMap
+                    jmpout .AttribTable
+                }
+                .ULTRA_ATTRIBUTE_COMMAND_LINE:
+                {
+                    push commandLine
+                    push 0
+                    sub
+                    jmpoutnz .AttribTable
+
+                    push curAttribute
+                    pop commandLine
+                    jmpout .AttribTable
+                }
+                .ULTRA_ATTRIBUTE_FRAMEBUFFER_INFO:
+                {
+                    push framebuffer
+                    push 0
+                    sub
+                    jmpoutnz .AttribTable
+
+                    push curAttribute
+                    pop framebuffer
+                    jmpout .AttribTable
+                }
+            }
+
+            push curAttribute
+            call UltraNextAttribute
+            pop curAttribute
+
+            jmp .loop
+        }
+
+        jmpout
+    }
+
+    push platformInfo
+    push 0
+    sub
+    bool
+    push memoryMap
+    push 0
+    sub
+    bool
+    push commandLine
+    push 0
+    sub
+    bool
+    push framebuffer
+    push 0
+    sub
+    bool
+    and
+    and
+    jz .AttribError
+
+    push commandLine->Text
+    call KernelSelectAllocatorsFromCommandLine
+
+    push memoryMap
+    call UltraMemoryMapEntryCount
+
+    push UltraProtocolMemoryMapConverter
+    push memoryMap
+    call PMMInit
+
+    call KernelSetupVMM
+
+    // push platformInfo->ACPI_RSDPAddress
+    // call ACPISetRSDPAddress
+
+    ret
+
+    .AttribError:
+    {
+        push UltraAttribErrorFmt
+        push platformInfo
+        push memoryMap
+        push commandLine
+        push framebuffer
+        call printf
+        call KernelPanic
+        ret
+    }
+}
+
+UltraProtocolMemoryMapConverter(void* userdata, sz index, struct PMMMemoryMapEntry* entry) -> bool:
+{
+    local memoryMap -> struct UltraMemoryMapAttribute* = userdata;
+
+    push index
+    push memoryMap
+    call UltraMemoryMapEntryCount
+    sub
+    jzg .False
+
+    local mapEntry -> struct UltraMemoryMapEntry* = memoryMap->entries[index];
+    push mapEntry->PhysicalAddress
+    pop entry->Start
+    push mapEntry->Size
+    pop entry->Size
+    push mapEntry->Type
+    switch .TypeTable
+
+    .TypeTable(u32):
+    {
+        push PMMMemoryMapTypeReserved
+        pop entry->Type
+        jmpout
+        .ULTRA_MEMORY_TYPE_INVALID:
+        {
+            push PMMMemoryMapTypeInvalid
+            pop entry->Type
+            jmpout .TypeTable
+        }
+        .ULTRA_MEMORY_TYPE_FREE:
+        {
+            push PMMMemoryMapTypeUsable
+            pop entry->Type
+            jmpout .TypeTable
+        }
+        .ULTRA_MEMORY_TYPE_RESERVED:
+        {
+            push PMMMemoryMapTypeReserved
+            pop entry->Type
+            jmpout .TypeTable
+        }
+        .ULTRA_MEMORY_TYPE_RECLAIMABLE:
+        {
+            push PMMMemoryMapTypeReclaimable
+            pop entry->Type
+            jmpout .TypeTable
+        }
+        .ULTRA_MEMORY_TYPE_NVS:
+        {
+            push PMMMemoryMapTypeNVS
+            pop entry->Type
+            jmpout .TypeTable
+        }
+        .ULTRA_MEMORY_TYPE_LOADER_RECLAIMABLE:
+        {
+            push PMMMemoryMapTypeLoaderReclaimable
+            pop entry->Type
+            jmpout .TypeTable
+        }
+        .ULTRA_MEMORY_TYPE_MODULE:
+        {
+            push PMMMemoryMapTypeModule
+            pop entry->Type
+            jmpout .TypeTable
+        }
+        .ULTRA_MEMORY_TYPE_KERNEL_STACK:
+        .ULTRA_MEMORY_TYPE_KERNEL_BINARY:
+        {
+            push PMMMemoryMapTypeKernel
+            pop entry->Type
+            jmpout .TypeTable
+        }
+    }
+    
+    push true
+    ret
+
+    .False:
+    {
+        push false
+        ret
+    }
+}
