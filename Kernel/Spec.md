@@ -4,18 +4,18 @@
 enum PMMMemoryMapType
 {
     PMMMemoryMapTypeInvalid           = 0x00,
-	PMMMemoryMapTypeUsable            = 0x01,
-	PMMMemoryMapTypeReclaimable       = 0x11,
-	PMMMemoryMapTypeLoaderReclaimable = 0x21,
-	PMMMemoryMapTypeTaken             = 0x02,
-	PMMMemoryMapTypeNullGuard         = 0x12,
-	PMMMemoryMapTypeTrampoline        = 0x22,
-	PMMMemoryMapTypeKernel            = 0x04,
-	PMMMemoryMapTypeModule            = 0x14,
-	PMMMemoryMapTypePMM               = 0x24,
-	PMMMemoryMapTypeReserved          = 0x08,
-	PMMMemoryMapTypeACPI              = 0x18,
-	PMMMemoryMapTypeNVS               = 0x28
+    PMMMemoryMapTypeUsable            = 0x01,
+    PMMMemoryMapTypeReclaimable       = 0x11,
+    PMMMemoryMapTypeLoaderReclaimable = 0x21,
+    PMMMemoryMapTypeTaken             = 0x02,
+    PMMMemoryMapTypeNullGuard         = 0x12,
+    PMMMemoryMapTypeTrampoline        = 0x22,
+    PMMMemoryMapTypeKernel            = 0x04,
+    PMMMemoryMapTypeModule            = 0x14,
+    PMMMemoryMapTypePMM               = 0x24,
+    PMMMemoryMapTypeReserved          = 0x08,
+    PMMMemoryMapTypeACPI              = 0x18,
+    PMMMemoryMapTypeNVS               = 0x28
 };
 
 struct PMMMemoryMapEntry
